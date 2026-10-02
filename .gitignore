@@ -1,0 +1,41 @@
+# Python / venvs
+.venv/
+.venv311/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Modelos pesados RVC (no subir a GitHub, usar scripts/download_models.py)
+models/pretrained/**/*.pth
+models/pretrained/**/*.index
+models/pretrained/**/*.mp3
+models/pretrained/**/*.wav
+models/custom/*
+*.pth
+*.index
+models/pretrained/**/*.txt
+models/pretrained/**/*.mp3
+
+# HuBERT / assets grandes
+assets/hubert_base.pt
+models/assets/
+
+# Sistema / IDE
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Build / dist
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Mantener estructura de carpetas vacias
+!models/custom/.gitkeep
+!assets/icons/.gitkeep
+!assets/sounds/.gitkeep
+!models/pretrained/README.md
