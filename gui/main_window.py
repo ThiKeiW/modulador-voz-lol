@@ -9,13 +9,17 @@ from PyQt6.QtWidgets import (
     QStatusBar, QMenuBar, QMessageBox, QSplitter,
     QGroupBox, QCheckBox, QProgressBar, QTextEdit,
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QAction
 
 from config import (
     APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT,
     DEFAULT_PITCH_SHIFT, DEFAULT_F0_METHOD,
 )
+from core.audio_capture import AudioCapture
+from core.rvc_engine import RVCEngine
+from core.model_manager import ModelManager
+from core.conversion_thread import ConversionThread
 
 
 class AudioVisualizer(QFrame):
@@ -81,42 +85,6 @@ class AudioVisualizer(QFrame):
         painter.end()
 
 
-class ConversionThread(QThread):
-    """Hilo para procesamiento de audio en tiempo real."""
-    audio_processed = pyqtSignal(object)
-    error_occurred = pyqtSignal(str)
-
-    def __init__(self, rvc_engine, audio_capture, parent=None):
-        super().__init__(parent)
-        self.rvc_engine = rvc_engine
-        self.audio_capture = audio_capture
-        self.running = False
-        self.pitch_shift = DEFAULT_PITCH_SHIFT
-        self.f0_method = DEFAULT_F0_METHOD
-
-    def run(self):
-        self.running = True
-        while self.running:
-            chunk = self.audio_capture.get_chunk()
-            if chunk is not None and self.rvc_engine.is_loaded():
-                try:
-                    result = self.rvc_engine.convert(
-                        chunk,
-                        pitch_shift=self.pitch_shift,
-                        f0_method=self.f0_method,
-                    )
-                    if result is not None:
-                        self.audio_processed.emit(result)
-                except Exception as e:
-                    self.error_occurred.emit(str(e))
-            else:
-                self.msleep(10)
-
-    def stop(self):
-        self.running = False
-        self.wait()
-
-
 class MainWindow(QMainWindow):
     """Ventana principal del Modulador de Voz."""
 
@@ -127,11 +95,13 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
 
         # Motor components (lazy init)
+        self.model_manager = ModelManager()
         self.rvc_engine = None
         self.tts_engine = None
         self.audio_capture = None
         self.conversion_thread = None
         self.selected_model_id = None
+        self.loaded_model_id = None
 
         self._setup_ui()
         self._setup_menu()
@@ -188,8 +158,8 @@ class MainWindow(QMainWindow):
         # Agregar personajes demo
         self._add_character_button("Aatrox", "aatrox", "Darkin Blade - EN")
         self._add_character_button("Ezreal", "ezreal", "Prodigal Explorer - EN")
-        self._add_character_button("Briar", "briar", "Espanol Latino")
-        self._add_character_button("Yuumi", "yuumi", "Espanol Latino")
+        self._add_character_button("Briar", "briar_latino", "Espanol Latino")
+        self._add_character_button("Yuumi", "yuumi_latino", "Espanol Latino")
 
         layout.addStretch()
 
@@ -400,6 +370,7 @@ class MainWindow(QMainWindow):
         self.f0_combo = QComboBox()
         self.f0_combo.addItems(["rmvpe", "harvest", "crepe"])
         self.f0_combo.setCurrentText("rmvpe")
+        self.f0_combo.currentTextChanged.connect(self._on_f0_method_changed)
         self.f0_combo.setStyleSheet("""
             QComboBox {
                 background-color: #1a1a2e;
@@ -499,6 +470,13 @@ class MainWindow(QMainWindow):
         """Callback cuando cambia el pitch."""
         sign = "+" if value > 0 else ""
         self.pitch_label.setText(f"{sign}{value}")
+        if self.conversion_thread:
+            self.conversion_thread.set_pitch_shift(value)
+
+    def _on_f0_method_changed(self, method: str):
+        """Callback cuando cambia el algoritmo de extraccion de pitch (F0)."""
+        if self.conversion_thread:
+            self.conversion_thread.set_f0_method(method)
 
     def _on_start_click(self):
         """Inicia la conversion de voz."""
@@ -509,7 +487,45 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self.log("Iniciando conversion de voz...")
+        model = self.model_manager.get_model(self.selected_model_id)
+        if not model or not model.downloaded or not model.path:
+            QMessageBox.warning(
+                self, "Modelo no disponible",
+                f"El modelo '{self.selected_model_id}' no esta descargado.\n"
+                "Ve a Archivo > Descargar Modelos..."
+            )
+            return
+
+        if self.rvc_engine is None:
+            self.rvc_engine = RVCEngine()
+            self.rvc_engine.initialize()
+
+        if self.loaded_model_id != model.id:
+            self.log(f"Cargando modelo: {model.name}...")
+            if not self.rvc_engine.load_model(model.path, model.name):
+                QMessageBox.critical(
+                    self, "Error al cargar modelo",
+                    f"No se pudo cargar '{model.name}'. Revisa la consola para mas detalles."
+                )
+                return
+            self.loaded_model_id = model.id
+
+        if self.audio_capture is None:
+            self.audio_capture = AudioCapture()
+
+        self.conversion_thread = ConversionThread(
+            audio_capture=self.audio_capture,
+            rvc_engine=self.rvc_engine,
+            pitch_shift=self.pitch_slider.value(),
+            f0_method=self.f0_combo.currentText(),
+        )
+        self.conversion_thread.status_changed.connect(self._on_conversion_status)
+        self.conversion_thread.error_occurred.connect(self._on_conversion_error)
+        self.conversion_thread.latency_updated.connect(self._on_latency_updated)
+        self.conversion_thread.level_updated.connect(self.visualizer.update_level)
+        self.conversion_thread.start()
+
+        self.log(f"Iniciando conversion de voz con {model.name}...")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.status_bar.showMessage("Convirtiendo voz en tiempo real...")
@@ -518,11 +534,27 @@ class MainWindow(QMainWindow):
         """Detiene la conversion de voz."""
         if self.conversion_thread:
             self.conversion_thread.stop()
+            self.conversion_thread = None
 
+        self.visualizer.update_level(0.0)
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_bar.showMessage("Conversion detenida")
         self.log("Conversion detenida")
+
+    def _on_conversion_status(self, status: str):
+        """Reacciona a cambios de estado del ConversionThread."""
+        self.log(f"[Conversion] {status}")
+
+    def _on_conversion_error(self, message: str):
+        """Muestra errores del ConversionThread y detiene la conversion."""
+        self.log(f"[Error] {message}")
+        self.status_bar.showMessage("Error en la conversion - ver log")
+        self._on_stop_click()
+
+    def _on_latency_updated(self, latency_ms: float):
+        """Actualiza la barra de estado con la latencia del ultimo chunk."""
+        self.status_bar.showMessage(f"Convirtiendo voz en tiempo real... ({latency_ms:.0f}ms)")
 
     def _on_train_click(self):
         """Abre la ventana de entrenamiento."""
