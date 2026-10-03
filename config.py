@@ -14,16 +14,37 @@ ICONS_DIR = ASSETS_DIR / "icons"
 SOUNDS_DIR = ASSETS_DIR / "sounds"
 
 # Audio settings
-SAMPLE_RATE = 40000
-CHUNK_SIZE = 4096
+# SAMPLE_RATE es la tasa del dispositivo (mic/parlante), NO la tasa interna
+# del modelo RVC (esa sale del propio .pth como tgt_sr y se resamplea sola).
+SAMPLE_RATE = 48000
 CHANNELS = 1
 AUDIO_FORMAT = "float32"
 
+# CHUNK_SIZE ya no se usa para el motor RVC real (ver REALTIME_* abajo,
+# el tamano de bloque sale de block_ms). Queda solo como fallback para
+# AudioCapture si se usa fuera del pipeline de conversion en tiempo real.
+CHUNK_SIZE = 1024
+
+# Streaming RVC en tiempo real (ver core/rvc_stream.py). Mismos defaults
+# que RVC-WebUI oficial (realtime_gui.py): block 250ms, crossfade SOLA 50ms,
+# contexto extra 2500ms para calidad del hubert/f0 (no es latencia de espera,
+# es historial ya cacheado). Latencia real por bloque ~ block_ms + computo.
+REALTIME_BLOCK_MS = 250
+REALTIME_CROSSFADE_MS = 50
+REALTIME_EXTRA_MS = 2500
+
 # RVC settings
-DEFAULT_F0_METHOD = "rmvpe"  # rmvpe, harvest, crepe
+DEFAULT_F0_METHOD = "rmvpe"  # rmvpe (recomendado, requiere rmvpe.pt), pm, harvest
 DEFAULT_PITCH_SHIFT = 0  # semitones
 MAX_PITCH_SHIFT = 12
 MIN_PITCH_SHIFT = -12
+DEFAULT_INDEX_RATE = 0.5  # 0 = sin retrieval por indice, 1 = maximo
+
+# Assets compartidos de inferencia (no son parte de ningun personaje):
+# formato Transformers (NO el .pt original de fairseq), descargar con
+# scripts/download_assets.py desde huggingface.co/lj1995/VoiceConversionWebUI
+HUBERT_DIR = MODELS_DIR / "hubert_base"
+RMVPE_PATH = MODELS_DIR / "rmvpe" / "rmvpe.pt"
 
 # TTS settings
 TTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"

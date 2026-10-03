@@ -14,7 +14,7 @@ from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QAction
 
 from config import (
     APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT,
-    DEFAULT_PITCH_SHIFT, DEFAULT_F0_METHOD,
+    DEFAULT_PITCH_SHIFT, DEFAULT_F0_METHOD, DEFAULT_INDEX_RATE,
 )
 from core.audio_capture import AudioCapture
 from core.rvc_engine import RVCEngine
@@ -368,7 +368,7 @@ class MainWindow(QMainWindow):
         f0_layout = QHBoxLayout()
         f0_layout.addWidget(QLabel("Algoritmo F0:"))
         self.f0_combo = QComboBox()
-        self.f0_combo.addItems(["rmvpe", "harvest", "crepe"])
+        self.f0_combo.addItems(["rmvpe", "pm", "harvest"])
         self.f0_combo.setCurrentText("rmvpe")
         self.f0_combo.currentTextChanged.connect(self._on_f0_method_changed)
         self.f0_combo.setStyleSheet("""
@@ -502,10 +502,15 @@ class MainWindow(QMainWindow):
 
         if self.loaded_model_id != model.id:
             self.log(f"Cargando modelo: {model.name}...")
-            if not self.rvc_engine.load_model(model.path, model.name):
+            ok = self.rvc_engine.load_model(
+                model.path, model.name, model.index_path or None
+            )
+            if not ok:
                 QMessageBox.critical(
                     self, "Error al cargar modelo",
-                    f"No se pudo cargar '{model.name}'. Revisa la consola para mas detalles."
+                    f"No se pudo cargar '{model.name}'. Revisa que "
+                    "models/hubert_base/ y models/rmvpe/rmvpe.pt existan "
+                    "(python scripts/download_assets.py) y la consola para mas detalles."
                 )
                 return
             self.loaded_model_id = model.id
@@ -518,6 +523,7 @@ class MainWindow(QMainWindow):
             rvc_engine=self.rvc_engine,
             pitch_shift=self.pitch_slider.value(),
             f0_method=self.f0_combo.currentText(),
+            index_rate=DEFAULT_INDEX_RATE if model.index_path else 0.0,
         )
         self.conversion_thread.status_changed.connect(self._on_conversion_status)
         self.conversion_thread.error_occurred.connect(self._on_conversion_error)
@@ -543,18 +549,15 @@ class MainWindow(QMainWindow):
         self.log("Conversion detenida")
 
     def _on_conversion_status(self, status: str):
-        """Reacciona a cambios de estado del ConversionThread."""
         self.log(f"[Conversion] {status}")
 
     def _on_conversion_error(self, message: str):
-        """Muestra errores del ConversionThread y detiene la conversion."""
         self.log(f"[Error] {message}")
         self.status_bar.showMessage("Error en la conversion - ver log")
         self._on_stop_click()
 
     def _on_latency_updated(self, latency_ms: float):
-        """Actualiza la barra de estado con la latencia del ultimo chunk."""
-        self.status_bar.showMessage(f"Convirtiendo voz en tiempo real... ({latency_ms:.0f}ms)")
+        self.status_bar.showMessage(f"Convirtiendo voz en tiempo real... ({latency_ms:.0f}ms/bloque)")
 
     def _on_train_click(self):
         """Abre la ventana de entrenamiento."""

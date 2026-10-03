@@ -1,19 +1,16 @@
 """
 core/conversion_thread.py
 
-Hilo de conversion de voz en tiempo real (Fase 2 del AGENTS.md).
-Conecta AudioCapture -> RVCEngine -> salida de audio (sounddevice).
+Hilo de conversion de voz en tiempo real (Fase 2, AGENTS.md). Conecta
+AudioCapture -> RVCStream (buffer+SOLA sobre RVCEngine) -> salida de audio.
 
-Este hilo asume que el modelo YA fue cargado en rvc_engine (via
-rvc_engine.load_model(...)) antes de llamar a start(). No carga modelos
-por si mismo para mantener responsabilidades separadas: la GUI decide
-que modelo usar, este hilo solo mueve el audio.
+Requiere que el RVCEngine YA tenga un modelo cargado (via
+RVCEngine.load_model(...)) antes de instanciar este hilo: la GUI decide
+que personaje usar y carga el modelo; este hilo solo mueve el audio.
 
-NOTA IMPORTANTE: RVCEngine.convert() actualmente es un placeholder que
-solo aplica pitch-shift (resample simple), NO corre inferencia real del
-modelo .pth cargado. Este hilo ya queda listo para cuando esa inferencia
-se implemente; hoy escucharas tu propia voz con el pitch ajustado, no la
-voz del personaje.
+El tamano de chunk que AudioCapture debe entregar NO es libre: tiene que
+ser exactamente RVCStream.block_frame (se fija aca mismo, en run(), antes
+de audio_capture.start()). Pasar chunks de otro tamano rompe el streaming.
 """
 import time
 import traceback
@@ -23,31 +20,27 @@ import numpy as np
 import sounddevice as sd
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from config import DEFAULT_PITCH_SHIFT, DEFAULT_F0_METHOD
+from config import (
+    DEFAULT_PITCH_SHIFT,
+    DEFAULT_F0_METHOD,
+    DEFAULT_INDEX_RATE,
+    REALTIME_BLOCK_MS,
+    REALTIME_CROSSFADE_MS,
+    REALTIME_EXTRA_MS,
+)
+from core.rvc_stream import RVCStream
 
 
 class ConversionThread(QThread):
-    """
-    Hilo dedicado a la conversion de voz en tiempo real.
-
-    Flujo:
-        AudioCapture (su propio hilo interno, con cola) -> get_chunk()
-        -> RVCEngine.convert() -> sounddevice.OutputStream.write()
-
-    Señales para la GUI:
-        status_changed(str)     -> "iniciando" | "corriendo" | "detenido"
-        error_occurred(str)     -> mensaje de error si algo falla
-        latency_updated(float)  -> latencia de procesamiento del ultimo chunk, en ms
-        level_updated(float)    -> nivel RMS del audio convertido (0.0-1.0), para el visualizador
-    """
+    """Hilo dedicado a la conversion de voz en tiempo real."""
 
     status_changed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
     latency_updated = pyqtSignal(float)
     level_updated = pyqtSignal(float)
 
-    LATENCY_WARNING_MS = 200  # objetivo de Fase 2 en AGENTS.md
-    POLL_SLEEP_MS = 5         # espera cuando la cola de audio esta vacia
+    LATENCY_WARNING_MS = 200  # referencia del AGENTS.md; con block=250ms+computo
+                               # es normal superarlo, ver nota en el reporte
 
     def __init__(
         self,
@@ -57,6 +50,10 @@ class ConversionThread(QThread):
         output_device: Optional[int] = None,
         pitch_shift: int = DEFAULT_PITCH_SHIFT,
         f0_method: str = DEFAULT_F0_METHOD,
+        index_rate: float = DEFAULT_INDEX_RATE,
+        block_ms: float = REALTIME_BLOCK_MS,
+        crossfade_ms: float = REALTIME_CROSSFADE_MS,
+        extra_ms: float = REALTIME_EXTRA_MS,
         parent=None,
     ):
         super().__init__(parent)
@@ -66,8 +63,13 @@ class ConversionThread(QThread):
         self.output_device = output_device
         self.pitch_shift = pitch_shift
         self.f0_method = f0_method
+        self.index_rate = index_rate
+        self.block_ms = block_ms
+        self.crossfade_ms = crossfade_ms
+        self.extra_ms = extra_ms
 
         self.running = False
+        self.stream: Optional[RVCStream] = None
 
     def run(self):
         if not self.rvc_engine.is_loaded():
@@ -79,6 +81,18 @@ class ConversionThread(QThread):
 
         out_stream = None
         try:
+            self.stream = RVCStream(
+                self.rvc_engine,
+                sample_rate=self.audio_capture.sample_rate,
+                block_ms=self.block_ms,
+                crossfade_ms=self.crossfade_ms,
+                extra_ms=self.extra_ms,
+            )
+            # El chunk que pida AudioCapture tiene que calzar exacto con el
+            # bloque que espera RVCStream (depende de block_ms y de la
+            # tasa del dispositivo, no es un numero fijo).
+            self.audio_capture.chunk_size = self.stream.block_frame
+
             self.audio_capture.start(device_index=self.device_index)
 
             out_stream = sd.OutputStream(
@@ -95,18 +109,19 @@ class ConversionThread(QThread):
             while self.running:
                 chunk = self.audio_capture.get_chunk()
                 if chunk is None:
-                    self.msleep(self.POLL_SLEEP_MS)
+                    self.msleep(5)
                     continue
 
                 t_start = time.perf_counter()
                 try:
-                    converted = self.rvc_engine.convert(
+                    converted = self.stream.process(
                         chunk,
-                        pitch_shift=self.pitch_shift,
+                        f0_up_key=self.pitch_shift,
+                        index_rate=self.index_rate,
                         f0_method=self.f0_method,
                     )
                 except Exception as exc:
-                    self.error_occurred.emit(f"Error en conversion: {exc}")
+                    self.error_occurred.emit(f"Error en conversion: {exc}\n{traceback.format_exc()}")
                     continue
 
                 if converted is None or len(converted) == 0:
@@ -117,6 +132,11 @@ class ConversionThread(QThread):
 
                 latency_ms = (time.perf_counter() - t_start) * 1000
                 self.latency_updated.emit(latency_ms)
+                if latency_ms > self.block_ms:
+                    # Mas lento que el bloque que hay que producir: se va a
+                    # ir acumulando retraso. Con GPU deberia ir sobrado;
+                    # en CPU puro probablemente haya que subir block_ms.
+                    print(f"[ConversionThread] Latencia {latency_ms:.0f}ms > block {self.block_ms:.0f}ms")
 
                 rms = float(np.sqrt(np.mean(np.square(converted)))) if converted.size else 0.0
                 self.level_updated.emit(min(rms * 4, 1.0))
@@ -142,6 +162,9 @@ class ConversionThread(QThread):
 
     def set_f0_method(self, method: str):
         self.f0_method = method
+
+    def set_index_rate(self, rate: float):
+        self.index_rate = rate
 
     def stop(self):
         self.running = False

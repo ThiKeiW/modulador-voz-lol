@@ -25,6 +25,7 @@ class VoiceModel:
     is_custom: bool = False
     needs_training_es: bool = False
     downloaded: bool = False
+    index_path: str = ""  # vacio = sin retrieval por indice (ver RVCEngine)
 
 
 class ModelManager:
@@ -40,6 +41,7 @@ class ModelManager:
         for model_id, info in PRETRAINED_MODELS.items():
             model_dir = PRETRAINED_DIR / model_id
             model_files = list(model_dir.glob("*.pth")) if model_dir.exists() else []
+            index_files = list(model_dir.glob("*.index")) if model_dir.exists() else []
 
             self.models[model_id] = VoiceModel(
                 id=model_id,
@@ -52,6 +54,7 @@ class ModelManager:
                 is_custom=False,
                 needs_training_es=info.get("needs_training_es", False),
                 downloaded=len(model_files) > 0,
+                index_path=str(index_files[0]) if index_files else "",
             )
 
     def _scan_custom_models(self):
@@ -62,6 +65,7 @@ class ModelManager:
         for model_dir in CUSTOM_DIR.iterdir():
             if model_dir.is_dir():
                 model_files = list(model_dir.glob("*.pth"))
+                index_files = list(model_dir.glob("*.index"))
                 meta_file = model_dir / "metadata.json"
 
                 if model_files:
@@ -81,6 +85,7 @@ class ModelManager:
                         description=metadata.get("description", ""),
                         is_custom=True,
                         downloaded=True,
+                        index_path=str(index_files[0]) if index_files else "",
                     )
 
     def get_all_models(self) -> list[VoiceModel]:
