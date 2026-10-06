@@ -2,7 +2,10 @@
 
 ## Descripcion del Proyecto
 
-Aplicacion de escritorio para Windows que permite generar salidas de voz virtuales usando un modulador de voz con personajes entrenados con IA de League of Legends. Motor de conversion basado en RVC (Retrieval-based Voice Conversion) con soporte para Espanol Latino.
+Aplicacion de escritorio para Windows que permite generar salidas de voz virtuales usando un modulador de voz con personajes entrenados con IA de League of Legends. Motor de conversion RVC real (vendorizado del proyecto oficial) con soporte para Espanol Latino.
+
+Repo: https://github.com/ThiKeiW/modulador-voz-lol (rama `main`).
+Directorio local: `D:\ciclo 7\Proyecto-modulador\modulador-voz-lol\`.
 
 ---
 
@@ -12,7 +15,7 @@ Aplicacion de escritorio para Windows que permite generar salidas de voz virtual
 
 ```powershell
 # 1. Navegar al directorio del proyecto
-cd "D:\ciclo 7\Proyecto-modulador"
+cd "D:\ciclo 7\Proyecto-modulador\modulador-voz-lol"
 
 # 2. Ejecutar script de instalacion
 .\setup.ps1
@@ -20,33 +23,40 @@ cd "D:\ciclo 7\Proyecto-modulador"
 # 3. Activar entorno virtual
 .\.venv\Scripts\Activate.ps1
 
-# 4. Instalar dependencias adicionales (si no se instalaron automaticamente)
+# 4. Instalar dependencias
 pip install -r requirements.txt
+
+# 5. Descargar assets del motor (UNA sola vez, ~500-600MB: hubert + rmvpe)
+python scripts/download_assets.py
+
+# 6. Descargar modelos de personajes
+python scripts/download_models.py
 ```
 
 ### Ejecucion Diaria
 
 ```powershell
-# 1. Navegar al directorio
-cd "D:\ciclo 7\Proyecto-modulador"
-
-# 2. Activar entorno virtual
+cd "D:\ciclo 7\Proyecto-modulador\modulador-voz-lol"
 .\.venv\Scripts\Activate.ps1
-
-# 3. Ejecutar la aplicacion
 python main.py
 ```
+
+Seleccionar un personaje descargado -> Iniciar. Recomendado probar primero
+con Aatrox o Ezreal (tienen `.index`, suenan mejor que Briar/Yuumi).
 
 ### Descarga de Modelos Pre-entrenados
 
 ```powershell
-# Descargar todos los modelos
+# Todos los modelos
 python scripts/download_models.py
 
-# Descargar uno especifico
+# Uno especifico
 python scripts/download_models.py aatrox
 python scripts/download_models.py briar_latino
 ```
+
+Los binarios `.pth` / `.index` / audios estan ignorados en git por tamano
+(ver `.gitignore`); cada clon los descarga localmente.
 
 ---
 
@@ -54,209 +64,176 @@ python scripts/download_models.py briar_latino
 
 ### Fase 1: Estructura Base ✅ COMPLETADA
 
-| Archivo | Estado | Descripcion |
-|---------|--------|-------------|
-| `main.py` | ✅ | Punto de entrada, verificacion de dependencias |
-| `config.py` | ✅ | Configuracion global (paths, audio, ML, GUI) |
-| `requirements.txt` | ✅ | Dependencias del proyecto |
-| `setup.ps1` | ✅ | Script de instalacion automatica |
-| `README.md` | ✅ | Documentacion del proyecto |
+Base del proyecto: `main.py`, `config.py`, `requirements*.txt`, `setup.ps1`,
+`README.md`, GUI inicial PyQt6.
 
-### Core (Logica del Negocio) ✅ COMPLETADA
+### Fase 2: Motor de Conversion Real ✅ FUNCIONAL
 
-| Archivo | Estado | Descripcion |
-|---------|--------|-------------|
-| `core/__init__.py` | ✅ | Package init |
-| `core/audio_capture.py` | ✅ | Captura de audio desde microfono con PyAudio |
-| `core/rvc_engine.py` | ✅ | Motor de conversion RVC (hf-rvc + fallback PyTorch) |
-| `core/tts_engine.py` | ✅ | Motor Text-to-Speech (Coqui TTS) |
-| `core/model_manager.py` | ✅ | Gestion de modelos pre-entrenados y custom |
-
-### GUI (Interfaz Grafica) ✅ COMPLETADA
+El placeholder de pitch-shift fue reemplazado por inferencia RVC real
+(microfono -> HuBERT -> sintetizador -> parlante, con crossfade SOLA).
+Probado por el usuario en Windows + GTX 1650 con Yuumi.
 
 | Archivo | Estado | Descripcion |
 |---------|--------|-------------|
-| `gui/__init__.py` | ✅ | Package init |
-| `gui/main_window.py` | ✅ | Ventana principal con panel de personajes y controles |
-| `gui/character_panel.py` | ✅ | Panel de seleccion de personajes con cards |
-| `gui/voice_controls.py` | ✅ | Controles de pitch, efectos, dispositivos |
-| `gui/download_dialog.py` | ✅ | Dialogo de descarga de modelos |
+| `core/rvc_backend/` | ✅ | Arquitectura RVC vendorizada del repo oficial (MIT): `models.py` (sintetizador v1/v2 con/sin f0), `hubert.py` (features via `transformers`, sin fairseq), `rmvpe.py` (pitch), `gpu_rules.py`, `transforms/modules/attentions/commons`, `LICENSE` |
+| `core/rvc_engine.py` | ✅ | Motor real: carga `.pth` (v1/v2 auto-detectado + verificacion dura de pesos que revienta en vez de ruido silencioso), hubert, indice faiss opcional, F0 (rmvpe/pm/harvest) |
+| `core/rvc_stream.py` | ✅ | Buffer deslizante + crossfade SOLA + resample por bloque |
+| `core/conversion_thread.py` | ✅ | Hilo tiempo real: `AudioCapture` -> `RVCEngine` -> `sounddevice`, con senales de estado/error; warning solo si el COMPUTO supera el bloque |
+| `core/audio_capture.py` | ✅ | Captura PyAudio con lecturas chicas (2048) y cola acotada a 2 bloques; overflows logueados, no matan el hilo |
+| `scripts/download_assets.py` | ✅ | Descarga `hubert_base` y `rmvpe.pt` |
+| `docs/04-fase2-rvc-real.md` | ✅ | Bitacora completa de la fase (decision hf-rvc, fixes, profiling) |
 
-### Utilidades ✅ COMPLETADAS
+**Decision arquitectonica clave**: `hf-rvc` descartado — solo implementa
+v1/256-dim y los 4 modelos son v2/768-dim en contenido (`emb_phone`
+`(192,768)` medido en los `.pth`); con su `strict=False` la salida seria
+ruido sin error. Ver `docs/04-fase2-rvc-real.md`.
+
+### Fase 3: Descarga e Integracion de Modelos ✅ FUNCIONAL
 
 | Archivo | Estado | Descripcion |
 |---------|--------|-------------|
-| `utils/__init__.py` | ✅ | Package init |
-| `utils/audio_utils.py` | ✅ | Funciones de procesamiento de audio |
+| `core/model_manager.py` | ✅ | Registro pretrained + escaneo `models/custom/`; detecta `.pth` + `.index` por personaje |
+| `scripts/download_models.py` | ✅ | Descarga todos o por ID |
+| `gui/download_dialog.py` | ✅ | Descarga desde la GUI con progreso |
+| `gui/main_window.py` | ✅ | Arranque real (resuelve modelo, carga motor, arranca hilo); IDs `briar_latino`/`yuumi_latino` corregidos |
 
-### Scripts ✅ COMPLETADOS
+### Fase 4: Motor TTS ⏳ PENDIENTE
 
-| Archivo | Estado | Descripcion |
-|---------|--------|-------------|
-| `scripts/download_models.py` | ✅ | Descarga de modelos pre-entrenados |
+`core/tts_engine.py` existe (wrapper Coqui XTTS v2) pero sin integrar a la
+GUI: falta campo de texto, modo TTS y conexion con modelos RVC.
+
+### Fase 5: GUI de Entrenamiento ⏳ PENDIENTE
+
+Nada implementado. Flujo manual actual: RVC-WebUI/Ultimate-RVC externo ->
+`.pth` en `models/custom/` (autodetectado). Falta `gui/training_widget.py`.
+
+### Fase 6: Efectos de Audio ⏳ PENDIENTE
+
+`utils/audio_utils.py` tiene reverb/eco/normalizacion, pero sin conectar a
+la pipeline en vivo. `index_rate` fijo (0.5 con indice, 0 sin el); sin
+control en GUI. Formant shift y noise-gate no portados (recorte consciente).
+
+### Fase 7: Pulido y Empaquetado ⏳ PENDIENTE
+
+Sin PyInstaller, sin iconos de personajes, sin pruebas automatizadas.
 
 ---
 
-## Implementaciones Pendientes
+## Parametros de Tiempo Real Actuales (`config.py`)
 
-### Fase 2: Integracion del Motor de Conversion (PRIORIDAD ALTA)
+| Parametro | Valor | Nota |
+|-----------|-------|------|
+| `SAMPLE_RATE` (dispositivo) | 48000 | Separado de la tasa interna del modelo (40k) |
+| `REALTIME_BLOCK_MS` | 200 | 150 daba cortes; el computo va sobrado (~136ms) |
+| `REALTIME_CROSSFADE_MS` | 80 | Subido de 50 (transiciones menos roboticas) |
+| `REALTIME_EXTRA_MS` | 1000 | Lever principal de costo (reproceso sin cache) |
+| `DEVICE` | `cuda:0` si `torch.cuda.is_available()` | La deteccion vieja por `CUDA_VISIBLE_DEVICES` siempre caia a CPU |
+| `PROFILE_RVC` | True | Profiling por etapa con `cuda.synchronize()` |
+| OutputStream | `latency=0.1` | `"low"` daba underruns en WASAPI |
 
-- [ ] **Conectar audio_capture con rvc_engine**: Integrar la captura de microfono con el motor de conversion para procesamiento en tiempo real
-- [ ] **Implementar ConversionThread**: Hilo separado para conversion sin bloquear la GUI
-- [ ] **Reproducir audio convertido**: Agregar salida de audio con sounddevice para escuchar la voz convertida
-- [ ] **Latencia objetivo**: <200ms entre entrada y salida
+Latencia realista: ~250-400ms por bloque (el propio RVC-WebUI usa 250ms).
+La meta original <200ms del plan inicial no es alcanzable con esta calidad.
 
-### Fase 3: Descarga e Integracion de Modelos (PRIORIDAD ALTA)
+## Limitaciones Conocidas (recortes conscientes, no bugs)
 
-- [ ] **Descargar modelo Briar ES Latino**: `huggingface.co/Parampino/BriarLatino`
-- [ ] **Descargar modelo Aatrox EN**: `huggingface.co/trinitytf/Aatrox`
-- [ ] **Descargar modelo Ezreal EN**: `huggingface.co/LilYoda/ezrealLOL`
-- [ ] **Probar carga de modelos** en la GUI
-- [ ] **Integrar model_manager** con la GUI de personajes
-
-### Fase 4: Motor TTS (PRIORIDAD MEDIA)
-
-- [ ] **Instalar Coqui TTS**: Requiere Python 3.10-3.12
-- [ ] **Integrar modo texto-a-voz** en la GUI
-- [ ] **Agregar campo de texto** para modo TTS
-- [ ] **Conectar TTS con modelos RVC** para clonacion de voz
-
-### Fase 5: GUI de Entrenamiento (PRIORIDAD MEDIA)
-
-- [ ] **Crear ventana de entrenamiento** (`gui/training_widget.py`)
-- [ ] **Formulario de carga de audio** (WAV/MP3, 10-30 min)
-- [ ] **Configuracion de epochs**, batch size, algoritmo F0
-- [ ] **Barra de progreso** durante entrenamiento
-- [ ] **Guardar modelo entrenado** en `models/custom/`
-
-### Fase 6: Efectos de Audio (PRIORIDAD BAJA)
-
-- [ ] **Implementar reverb** en `utils/audio_utils.py`
-- [ ] **Implementar eco/delay**
-- [ ] **Normalizacion de volumen** en tiempo real
-- [ ] **Conectar efectos** con checkboxes de la GUI
-
-### Fase 7: Pulido y Empaquetado (PRIORIDAD BAJA)
-
-- [ ] **Optimizar rendimiento** de la GUI
-- [ ] **Crear iconos** de personajes
-- [ ] **Empaquetar con PyInstaller** para distribucion
-- [ ] **Testing** en multiples configuraciones de hardware
+- **Briar y Yuumi sin `.index`** -> `index_rate=0`, algo menos de calidad.
+- **`gui/config.py` es codigo muerto**: duplicado viejo de `config.py` que
+  nada importa (verificado: 0 imports). No borrar sin revisar primero si
+  alguna rama lo usa; el `CHUNK_SIZE=1024` efectivo ya vive en `config.py`.
+- Sin `index_rate` en GUI, sin formant shift/noise-gate, sin tests.
 
 ---
 
 ## Dependencias Instaladas
 
 ```
-PyQt6           6.11.0    - GUI
-torch           2.7.1     - ML engine (CUDA 11.8)
-torchaudio      2.7.1     - Audio ML
-numpy           2.4.6     - Numeros
-scipy           1.18.0    - Audio processing
-soundfile       0.14.0    - Audio I/O
-sounddevice     0.5.5     - Audio I/O
-librosa         0.11.0    - Audio analysis
-hf-rvc          0.2.1     - RVC voice conversion
-faiss-cpu       1.14.3    - Vector search
-PyAudio         0.2.14    - Microphone capture
-huggingface-hub 1.22.0    - Model downloads
-omegaconf       2.3.1     - Config
-pydantic        2.13.4    - Data validation
-loguru          0.7.3     - Logging
-torchcrepe      0.0.24    - Pitch detection
-pyworld         0.3.5     - Audio analysis
+PyQt6               - GUI
+torch + torchaudio  - ML engine (CUDA 11.8; fp32 forzado en GTX serie 16)
+transformers        - HuBERT (reemplaza a fairseq, que no compila en Windows)
+faiss-cpu           - Retrieval del .index
+numpy / scipy / soundfile / sounddevice / librosa - Audio
+PyAudio             - Captura de microfono
+praat-parselmouth   - f0_method="pm" | pyworld - f0_method="harvest"
+huggingface-hub     - Descargas | omegaconf / pydantic / loguru - utils
 ```
+
+Fuera: `hf-rvc` (incompatible v1-only), `torchcrepe` (metodo "crepe" nunca
+existio de verdad), `fairseq` (no compila en Windows).
 
 ---
 
 ## Estructura del Proyecto
 
 ```
-Proyecto-modulador/
-├── main.py                    # Punto de entrada
-├── config.py                  # Configuracion global
-├── requirements.txt           # Dependencias
-├── setup.ps1                  # Script de instalacion
-├── README.md                  # Documentacion
-├── AGENTS.md                  # Este archivo
+modulador-voz-lol/
+├── main.py                    # Punto de entrada (+ logging.basicConfig)
+├── config.py                  # Configuracion global y tiempo real
+├── requirements.txt           # Full (Python 3.10-3.12)
+├── requirements-core.txt      # Rama Python 3.13 de setup.ps1
+├── setup.ps1                  # Instalacion (detecta GPU/CUDA)
+├── README.md / AGENTS.md
 │
 ├── core/
-│   ├── __init__.py
-│   ├── audio_capture.py       # Captura de microfono (PyAudio)
-│   ├── rvc_engine.py          # Motor de conversion RVC (hf-rvc)
-│   ├── tts_engine.py          # Motor Text-to-Speech (Coqui TTS)
-│   └── model_manager.py       # Gestion de modelos
+│   ├── audio_capture.py       # Captura PyAudio (lecturas chicas, cola acotada)
+│   ├── conversion_thread.py   # Hilo tiempo real + metricas separadas
+│   ├── rvc_engine.py          # Motor RVC real + verificacion dura de pesos
+│   ├── rvc_stream.py          # Buffer deslizante + SOLA + resample
+│   ├── rvc_backend/           # Vendorizado oficial (MIT): models, hubert,
+│   │                          # rmvpe, gpu_rules, modules, LICENSE
+│   ├── model_manager.py       # Registro pretrained + custom (.pth + .index)
+│   └── tts_engine.py          # Wrapper Coqui (SIN integrar a GUI)
 │
 ├── gui/
-│   ├── __init__.py
-│   ├── main_window.py         # Ventana principal PyQt6
-│   ├── character_panel.py     # Panel de personajes
-│   ├── voice_controls.py      # Controles de pitch/efectos
-│   └── download_dialog.py     # Dialogo de descarga
+│   ├── main_window.py         # Arranque real + visualizador + log
+│   ├── character_panel.py     # Cards ES/EN por personaje
+│   ├── voice_controls.py      # Pitch, F0, efectos, dispositivos
+│   ├── download_dialog.py     # Descarga con progreso
+│   └── config.py              # ⚠️ MUERTO: nada lo importa (ver Limitaciones)
 │
 ├── models/
-│   ├── pretrained/            # Modelos de LoL (descargados)
-│   │   ├── aatrox/
-│   │   ├── ezreal/
-│   │   ├── briar_latino/
-│   │   └── yuumi_latino/
-│   └── custom/                # Modelos entrenados por usuario
+│   ├── pretrained/            # .pth + .index (IGNORADOS en git) + README.md
+│   └── custom/                # Customs del usuario (ignorado, autodetectado)
 │
 ├── scripts/
-│   └── download_models.py     # Descarga de modelos
+│   ├── download_models.py     # Personajes (Aatrox/Ezreal/Briar/Yuumi)
+│   └── download_assets.py     # hubert + rmvpe (~500-600MB, una vez)
 │
-├── utils/
-│   ├── __init__.py
-│   └── audio_utils.py         # Utilidades de audio
-│
-└── assets/
-    ├── icons/                 # Iconos de personajes
-    └── sounds/                # Sonidos del sistema
+├── utils/audio_utils.py       # DSP suelto (SIN conectar a pipeline vivo)
+├── docs/                      # 01-plan · 02-proceso · 03-ejecucion · 04-fase2
+└── assets/                    # icons/, sounds/ (vacios)
 ```
 
 ---
 
 ## Modelos de League of Legends
 
-### Pre-entrenados (Descargables)
+| ID | Personaje | Idioma | `.index` | Notas |
+|----|-----------|--------|----------|-------|
+| `aatrox` | Aatrox | English | ✅ 189MB | RVC v2, f0, 40k |
+| `ezreal` | Ezreal | English | ✅ 94MB | RVC v2, f0, 40k |
+| `briar_latino` | Briar | ES Latino | ❌ | RVC v2, f0, 40k, `index_rate=0` |
+| `yuumi_latino` | Yuumi | ES Latino | ❌ | RVC v2, f0, 40k, `index_rate=0` |
 
-| ID | Personaje | Idioma | Fuente | URL |
-|----|-----------|--------|--------|-----|
-| `aatrox` | Aatrox | English | HuggingFace | `huggingface.co/trinitytf/Aatrox` |
-| `ezreal` | Ezreal | English | HuggingFace | `huggingface.co/LilYoda/ezrealLOL` |
-| `briar_latino` | Briar | ES Latino | HuggingFace | `huggingface.co/Parampino/BriarLatino` |
-| `yuumi_latino` | Yuumi | ES Latino | Weights.com | `weights.com/models/clm73bkvd22evcctcst9h87ke` |
-
-### Notas de Idioma
-
-- **Aatrox y Ezreal**: Modelos en ingles. Para usar en ES Latino se requiere entrenamiento adicional con audio del doblaje latino
-- **Briar y Yuumi**: Modelos en Espanol Latino listos para usar
+Arquitectura medida en los 4 `.pth`: contenido 768-dim + gin 256-dim
+(hibrido comunitario v2, no oficial puro). El `version: "v2"` del checkpoint
+selecciona la clase 768 vendorizada, cuyo `gin_channels` viene del propio
+checkpoint — verificado clave-por-clave (456/457 coinciden).
 
 ---
 
 ## Comandos Utiles
 
 ```powershell
-# Verificar entorno
-python --version
-pip list
-
-# Ejecutar aplicacion
+# App
 python main.py
 
-# Descargar modelos
+# Modelos y assets
 python scripts/download_models.py
+python scripts/download_assets.py
 
-# Instalar nueva dependencia
-pip install <paquete>
-
-# Actualizar dependencias
-pip install --upgrade -r requirements.txt
-
-# Verificar GPU
+# Entorno
+python --version; pip list
 nvidia-smi
-
-# Verificar torch con CUDA
 python -c "import torch; print(torch.cuda.is_available())"
 ```
 
@@ -264,51 +241,25 @@ python -c "import torch; print(torch.cuda.is_available())"
 
 ## Solucion de Problemas
 
-### Error: "No module named 'pyaudio'"
-```powershell
-pip install PyAudio
-# Si falla en Windows:
-pip install pipwin
-pipwin install pyaudio
-```
+### La conversion suena a ruido / no al personaje
+Revisar el log de carga: `get_synthesizer` revienta con `RuntimeError` si
+la arquitectura no calza. Si cargo sin error, verificar `device=cuda:0`
+en el log; si dice `cpu` con GPU presente, reinstalar torch con CUDA.
 
-### Error: "No module named 'torch'"
-```powershell
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
+### Latencia ~1000ms+ por bloque
+Causa conocida: todo en CPU. Verificar `device=cuda:0` en el log de carga.
+Si la GPU existe pero torch no la ve, reinstalar torch del index CUDA.
 
-### Error: "rvc-python requires faiss-cpu==1.7.3"
-```powershell
-pip install faiss-cpu  # Instala version mas reciente
-pip install rvc-python --no-deps  # Sin dependencias
-```
+### Cortes cada ~200ms / palabras separadas
+Ver: `latency=0.1` en OutputStream, `REALTIME_BLOCK_MS=200`,
+overflows `[AudioCapture] Input overflow #N` en log (indican que la
+captura, no el motor, pierde audio).
 
-### La GUI no se inicia
-```powershell
-# Verificar PyQt6
-pip install PyQt6
-python -c "from PyQt6.QtWidgets import QApplication; print('OK')"
-```
+### `ModuleNotFoundError: configs`
+Ya corregido via `gpu_rules.py`. Si reaparece, revisar imports de
+`core/rvc_backend/rmvpe.py`.
 
-### El microfono no funciona
-1. Verificar permisos de Windows para microfono
-2. Probar con `python -c "import pyaudio; pa=pyaudio.PyAudio(); print(pa.get_device_count(), 'devices')"`
-3. Cambiar dispositivo en la GUI (Controles de Voz > Dispositivo)
-
----
-
-## Proximo Paso Recomendado
-
-**Fase 2: Integrar conversion de voz en tiempo real**
-
-1. Conectar `AudioCapture` con `RVCEngine`
-2. Implementar `ConversionThread` para procesamiento async
-3. Agregar salida de audio con `sounddevice`
-4. Probar con modelo de Briar (ES Latino)
-
-Comando para iniciar:
-```powershell
-cd "D:\ciclo 7\Proyecto-modulador"
-.\.venv\Scripts\Activate.ps1
-python main.py
-```
+### Microfono no funciona
+1. Permisos de Windows para microfono
+2. `python -c "import pyaudio; pa=pyaudio.PyAudio(); print(pa.get_device_count())"`
+3. Cambiar dispositivo en Controles de Voz
