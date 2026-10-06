@@ -97,25 +97,30 @@ ruido sin error. Ver `docs/04-fase2-rvc-real.md`.
 | `gui/download_dialog.py` | ✅ | Descarga desde la GUI con progreso |
 | `gui/main_window.py` | ✅ | Arranque real (resuelve modelo, carga motor, arranca hilo); IDs `briar_latino`/`yuumi_latino` corregidos |
 
-### Fase 4: Motor TTS ⏳ PENDIENTE
+### Fase 4: Motor TTS ❌ DESCARTADA (alcance final: solo voz en vivo)
 
-`core/tts_engine.py` existe (wrapper Coqui XTTS v2) pero sin integrar a la
-GUI: falta campo de texto, modo TTS y conexion con modelos RVC.
+Decision del usuario (2026-10-06): la app es solo conversion en vivo.
+`core/tts_engine.py` queda como referencia sin cablear; no integrar a GUI.
 
-### Fase 5: GUI de Entrenamiento ⏳ PENDIENTE
+### Fase 5: GUI de Entrenamiento ❌ DESCARTADA (entrenamiento externo)
 
-Nada implementado. Flujo manual actual: RVC-WebUI/Ultimate-RVC externo ->
-`.pth` en `models/custom/` (autodetectado). Falta `gui/training_widget.py`.
+Decision del usuario (2026-10-06): el entrenamiento se hace fuera de la app
+con **Ultimate RVC**. Flujo oficial: entrenar ahi -> copiar `.pth` (+`.index`
+si hay) a `models/custom/` -> autodetectado por `ModelManager`. No se
+implementara `gui/training_widget.py`.
 
-### Fase 6: Efectos de Audio ⏳ PENDIENTE
+### Fase 6: Efectos de Audio 🔶 PARCIAL (solo slider `index_rate`)
 
-`utils/audio_utils.py` tiene reverb/eco/normalizacion, pero sin conectar a
-la pipeline en vivo. `index_rate` fijo (0.5 con indice, 0 sin el); sin
-control en GUI. Formant shift y noise-gate no portados (recorte consciente).
+Reverb/eco (`utils/audio_utils.py`), formant shift y noise-gate: descartados
+(recorte consciente, voz "seca" del sintetizador es aceptable).
+Pendiente minimo: exponer `index_rate` (hoy fijo 0.5 con indice / 0 sin el)
+como slider en la GUI.
 
-### Fase 7: Pulido y Empaquetado ⏳ PENDIENTE
+### Fase 7: Empaquetado 🔄 EN CURSO (`.exe` para compartir)
 
-Sin PyInstaller, sin iconos de personajes, sin pruebas automatizadas.
+Alcance final: uso personal + distribuir `.exe` a terceros. Ver
+`voicemod-lol.spec` + `build_exe.ps1`. Iconos de personajes y tests
+automatizados: descartados.
 
 ---
 
@@ -137,10 +142,9 @@ La meta original <200ms del plan inicial no es alcanzable con esta calidad.
 ## Limitaciones Conocidas (recortes conscientes, no bugs)
 
 - **Briar y Yuumi sin `.index`** -> `index_rate=0`, algo menos de calidad.
-- **`gui/config.py` es codigo muerto**: duplicado viejo de `config.py` que
-  nada importa (verificado: 0 imports). No borrar sin revisar primero si
-  alguna rama lo usa; el `CHUNK_SIZE=1024` efectivo ya vive en `config.py`.
-- Sin `index_rate` en GUI, sin formant shift/noise-gate, sin tests.
+- Sin `index_rate` en GUI (pendiente minimo de Fase 6), sin formant
+  shift/noise-gate, sin tests. `gui/config.py` (duplicado muerto, 0 imports)
+  eliminado el 2026-10-06.
 
 ---
 
@@ -181,14 +185,13 @@ modulador-voz-lol/
 │   ├── rvc_backend/           # Vendorizado oficial (MIT): models, hubert,
 │   │                          # rmvpe, gpu_rules, modules, LICENSE
 │   ├── model_manager.py       # Registro pretrained + custom (.pth + .index)
-│   └── tts_engine.py          # Wrapper Coqui (SIN integrar a GUI)
+│   └── tts_engine.py          # ⚠️ SIN USO (Fase 4 descartada, solo referencia)
 │
 ├── gui/
 │   ├── main_window.py         # Arranque real + visualizador + log
 │   ├── character_panel.py     # Cards ES/EN por personaje
-│   ├── voice_controls.py      # Pitch, F0, efectos, dispositivos
-│   ├── download_dialog.py     # Descarga con progreso
-│   └── config.py              # ⚠️ MUERTO: nada lo importa (ver Limitaciones)
+│   ├── voice_controls.py     # Pitch, F0, efectos, dispositivos
+│   └── download_dialog.py     # Descarga con progreso
 │
 ├── models/
 │   ├── pretrained/            # .pth + .index (IGNORADOS en git) + README.md
