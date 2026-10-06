@@ -116,11 +116,13 @@ Reverb/eco (`utils/audio_utils.py`), formant shift y noise-gate: descartados
 Pendiente minimo: exponer `index_rate` (hoy fijo 0.5 con indice / 0 sin el)
 como slider en la GUI.
 
-### Fase 7: Empaquetado 🔄 EN CURSO (`.exe` para compartir)
+### Fase 7: Empaquetado ✅ `.exe` FUNCIONAL (2026-10-06)
 
-Alcance final: uso personal + distribuir `.exe` a terceros. Ver
-`voicemod-lol.spec` + `build_exe.ps1`. Iconos de personajes y tests
-automatizados: descartados.
+`voicemod-lol.spec` (onedir, `console=True` para debug) + `build_exe.ps1`.
+Build con `.venv311` (Py3.11 + torch cu118): `dist/VoicemodLoL/`
+(~4.9GB: torch CUDA + transformers pesan). Smoke test: arranca y vive 30s+.
+Modelos/assets NO incluidos (se descargan aparte). Iconos y tests:
+descartados. Para build final sin consola: `console=False` en el spec.
 
 ---
 

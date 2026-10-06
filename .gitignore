@@ -28,10 +28,9 @@ models/assets/
 .DS_Store
 Thumbs.db
 
-# Build / dist
+# Build / dist (el .spec SI se versiona, es fuente del build)
 build/
 dist/
-*.spec
 *.egg-info/
 
 # Mantener estructura de carpetas vacias
