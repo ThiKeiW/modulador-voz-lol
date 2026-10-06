@@ -19,10 +19,13 @@ dispositivo). Pasarle un chunk de otro tamano rompe el alineamiento del
 buffer.
 """
 import logging
+import time
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from config import PROFILE_RVC
 import torchaudio.transforms as tat
 
 from core.rvc_engine import RVCEngine
@@ -50,7 +53,11 @@ class RVCStream:
         self.block_frame = int(round(block_ms / 1000 * sample_rate / self.zc) * self.zc)
         self.block_frame_16k = 160 * self.block_frame // self.zc
         crossfade_frame = int(round(crossfade_ms / 1000 * sample_rate / self.zc) * self.zc)
-        self.sola_buffer_frame = min(crossfade_frame, 4 * self.zc)
+        # El original RVC-WebUI clampea esto a 4*zc (40ms) fijo. Lo subimos
+        # a 8*zc (80ms tope) para permitir mas blend entre bloques si se
+        # pide -- mas crossfade = transiciones menos robotic/abruptas,
+        # a costo de un poco mas de computo en la busqueda SOLA.
+        self.sola_buffer_frame = min(crossfade_frame, 8 * self.zc)
         self.sola_search_frame = self.zc
         self.extra_frame = int(round(extra_ms / 1000 * sample_rate / self.zc) * self.zc)
 
@@ -101,6 +108,9 @@ class RVCStream:
                 f"muestras, se esperaban {self.block_frame} (RVCStream.block_frame)"
             )
 
+        prof = PROFILE_RVC
+        t0 = time.perf_counter() if prof else 0
+
         indata = np.asarray(audio_block, dtype=np.float32)
 
         self.input_wav[:-self.block_frame] = self.input_wav[self.block_frame:].clone()
@@ -111,6 +121,11 @@ class RVCStream:
         resampled = self.resampler(resample_input)[160:]
         self.input_wav_res[-self.block_frame_16k:] = resampled[-self.block_frame_16k:]
 
+        if prof:
+            if self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
+            t_resample_in = time.perf_counter()
+
         infer_wav = self.engine.infer(
             self.input_wav_res,
             self.block_frame_16k,
@@ -120,6 +135,11 @@ class RVCStream:
             f0_up_key=f0_up_key,
             index_rate=index_rate,
         )
+
+        if prof:
+            if self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
+            t_engine_done = time.perf_counter()
 
         if self.resampler2 is not None:
             infer_wav = self.resampler2(infer_wav)
@@ -137,4 +157,15 @@ class RVCStream:
         infer_wav[: self.sola_buffer_frame] += self.sola_buffer * self.fade_out_window
         self.sola_buffer[:] = infer_wav[self.block_frame: self.block_frame + self.sola_buffer_frame]
 
-        return infer_wav[: self.block_frame].float().cpu().numpy()
+        out = infer_wav[: self.block_frame].float().cpu().numpy()
+
+        if prof:
+            t_end = time.perf_counter()
+            print(
+                f"[Profile stream] resample_in={1000*(t_resample_in-t0):.0f}ms "
+                f"engine(ver linea Profile arriba)={1000*(t_engine_done-t_resample_in):.0f}ms "
+                f"resample_out+sola+copy={1000*(t_end-t_engine_done):.0f}ms "
+                f"TOTAL_bloque={1000*(t_end-t0):.0f}ms"
+            )
+
+        return out

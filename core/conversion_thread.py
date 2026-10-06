@@ -27,6 +27,7 @@ from config import (
     REALTIME_BLOCK_MS,
     REALTIME_CROSSFADE_MS,
     REALTIME_EXTRA_MS,
+    PROFILE_RVC,
 )
 from core.rvc_stream import RVCStream
 
@@ -100,7 +101,15 @@ class ConversionThread(QThread):
                 channels=1,
                 dtype="float32",
                 device=self.output_device,
-                latency="low",
+                # "low" le pide a WASAPI el buffer MAS CHICO posible --
+                # practicamente cero margen entre un write() y el
+                # siguiente. Con el loop entero (poll de cola + write +
+                # GIL) compitiendo por CPU con el computo real, eso es
+                # casi garantia de underrun justo en el borde de cada
+                # bloque (coincide con los cortes medidos en el waveform,
+                # uno por bloque). 100ms de buffer le da a PortAudio
+                # colchon real sin agregar latencia perceptible.
+                latency=0.1,
             )
             out_stream.start()
 
@@ -111,6 +120,10 @@ class ConversionThread(QThread):
                 if chunk is None:
                     self.msleep(5)
                     continue
+
+                if PROFILE_RVC:
+                    rms_in = float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
+                    print(f"[RMS entrada] mic={rms_in:.4f} qsize~={self.audio_capture.audio_queue.qsize()}")
 
                 t_start = time.perf_counter()
                 try:
@@ -127,16 +140,37 @@ class ConversionThread(QThread):
                 if converted is None or len(converted) == 0:
                     continue
 
+                # Medir SOLO el computo (process()) para decidir si vamos
+                # atrasados -- lo que sigue (write) bloquea esperando que
+                # el parlante tenga espacio, eso es pacing normal, no
+                # computo de mas, y mezclarlo en la misma metrica confunde
+                # (processing real puede ir sobrado y este numero igual
+                # da por encima de block_ms).
+                compute_ms = (time.perf_counter() - t_start) * 1000
+
                 converted = np.ascontiguousarray(converted, dtype=np.float32)
+
+                if PROFILE_RVC:
+                    # Para saber si el silencio ya viene DENTRO del audio
+                    # que arma el motor (bug de DSP, se arregla en
+                    # rvc_stream/rvc_engine) o lo mete el dispositivo de
+                    # salida despues (bug de audio I/O, se arregla en el
+                    # OutputStream). Partido en tercios del bloque.
+                    n = len(converted)
+                    third = max(1, n // 3)
+                    rms_start = float(np.sqrt(np.mean(np.square(converted[:third]))))
+                    rms_mid = float(np.sqrt(np.mean(np.square(converted[third:2*third]))))
+                    rms_end = float(np.sqrt(np.mean(np.square(converted[2*third:]))))
+                    print(f"[RMS bloque] inicio={rms_start:.4f} medio={rms_mid:.4f} fin={rms_end:.4f}")
+
                 out_stream.write(converted)
 
-                latency_ms = (time.perf_counter() - t_start) * 1000
-                self.latency_updated.emit(latency_ms)
-                if latency_ms > self.block_ms:
-                    # Mas lento que el bloque que hay que producir: se va a
-                    # ir acumulando retraso. Con GPU deberia ir sobrado;
-                    # en CPU puro probablemente haya que subir block_ms.
-                    print(f"[ConversionThread] Latencia {latency_ms:.0f}ms > block {self.block_ms:.0f}ms")
+                self.latency_updated.emit(compute_ms)
+                if compute_ms > self.block_ms:
+                    # Esto si importa: el computo solo ya no entra en el
+                    # tiempo del bloque -> se va a acumular atraso de
+                    # verdad (el write ya no alcanza a compensarlo).
+                    print(f"[ConversionThread] Computo {compute_ms:.0f}ms > block {self.block_ms:.0f}ms (vas atras)")
 
                 rms = float(np.sqrt(np.mean(np.square(converted)))) if converted.size else 0.0
                 self.level_updated.emit(min(rms * 4, 1.0))

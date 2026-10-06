@@ -16,13 +16,14 @@ oficial. Llamar a .infer() con un chunk aislado sin contexto da resultados
 pobres/con clicks; para eso existe RVCStream.
 """
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
 
-from config import DEVICE, HUBERT_DIR, RMVPE_PATH
+from config import DEVICE, HUBERT_DIR, RMVPE_PATH, PROFILE_RVC
 
 from core.rvc_backend.hubert import extract_hubert_features, load_hubert_model
 from core.rvc_backend.cuda_graph import run_cuda_graph
@@ -104,7 +105,9 @@ class RVCEngine:
     F0_METHODS = ("rmvpe", "pm", "harvest")
 
     def __init__(self, device: str = DEVICE, is_half: bool = False):
-        self.device = torch.device(device if torch.cuda.is_available() or device == "cpu" else "cpu")
+        cuda_ok = torch.cuda.is_available()
+        wants_cuda = device not in (None, "cpu")
+        self.device = torch.device(device if (wants_cuda and cuda_ok) else ("cuda:0" if cuda_ok else "cpu"))
         self.is_half = is_half and self.device.type == "cuda"
 
         self.hubert_model = None  # compartido entre personajes, se carga 1 vez
@@ -184,7 +187,7 @@ class RVCEngine:
 
             logger.info(
                 f"[RVCEngine] Modelo cargado: {self.model_name} "
-                f"(version={self.version}, f0={self.if_f0}, sr={self.tgt_sr})"
+                f"(version={self.version}, f0={self.if_f0}, sr={self.tgt_sr}, device={self.device})"
             )
             return True
 
@@ -317,11 +320,25 @@ class RVCEngine:
         if not self.is_loaded():
             raise RuntimeError("No hay modelo RVC cargado")
 
+        def _sync():
+            # CUDA es asincrono: sin esto, los tiempos entre etapas no
+            # significan nada (el compute real queda flotando y aparece
+            # recien en el siguiente punto que fuerza sincronizacion).
+            if self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
+
+        prof = PROFILE_RVC
+        t0 = time.perf_counter() if prof else 0
+
         with torch.no_grad():
             feats = input_wav_16k.half().view(1, -1) if self.is_half else input_wav_16k.float().view(1, -1)
             padding_mask = torch.BoolTensor(feats.shape).to(self.device).fill_(False)
             feats = extract_hubert_features(self.hubert_model, feats, self.version, padding_mask=padding_mask)
             feats = torch.cat((feats, feats[:, -1:, :]), 1)
+
+            if prof:
+                _sync()
+                t_hubert = time.perf_counter()
 
             if self.index is not None and index_rate != 0:
                 try:
@@ -340,6 +357,10 @@ class RVCEngine:
                 except Exception:
                     logger.exception("[RVCEngine] Error en retrieval por indice")
 
+            if prof:
+                _sync()
+                t_index = time.perf_counter()
+
             p_len = input_wav_16k.shape[0] // 160
             return_length2 = int(return_length)
             if self.if_f0 == 1:
@@ -354,6 +375,10 @@ class RVCEngine:
                 self.cache_pitchf[4 - pitch.shape[0]:] = pitchf[3:-1]
                 cache_pitch = self.cache_pitch[None, -p_len:]
                 cache_pitchf = self.cache_pitchf[None, -p_len:]
+
+            if prof:
+                _sync()
+                t_f0 = time.perf_counter()
 
             feats = torch.nn.functional.interpolate(feats.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
             feats = feats[:, :p_len, :]
@@ -379,6 +404,17 @@ class RVCEngine:
                         skip_head_value, return_length_value, return_length2,
                     )[0],
                     feats, p_len_tensor, sid,
+                )
+
+            if prof:
+                _sync()
+                t_synth = time.perf_counter()
+                print(
+                    f"[Profile] hubert={1000*(t_hubert-t0):.0f}ms "
+                    f"index={1000*(t_index-t_hubert):.0f}ms "
+                    f"f0={1000*(t_f0-t_index):.0f}ms "
+                    f"synth={1000*(t_synth-t_f0):.0f}ms "
+                    f"total={1000*(t_synth-t0):.0f}ms"
                 )
 
             return infered_audio.squeeze(1).float().squeeze()

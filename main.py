@@ -4,9 +4,14 @@ Modulador de Voz Virtual con IA para personajes de League of Legends.
 """
 import sys
 import os
+import logging
 
 # Agregar directorio raiz al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Sin esto los logger.info() (ej. que device uso RVCEngine: cpu o cuda)
+# no se ven en consola -- nivel por defecto de logging es WARNING.
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def check_dependencies():
@@ -52,12 +57,23 @@ def check_dependencies():
         missing_optional.append("pyaudio")
         print("[--] PyAudio no disponible (captura de audio deshabilitada)")
 
+    # El motor real ya no usa el paquete rvc-python (se descarto, ver
+    # docs/04-fase2-rvc-real.md) -- lo que de verdad hace falta son los
+    # assets de hubert_base/rmvpe que no van en el repo por peso.
     try:
-        from rvc_python import Inference
-        print("[OK] rvc-python disponible")
+        import transformers  # noqa: F401
+        print("[OK] transformers disponible")
     except ImportError:
-        missing_optional.append("rvc-python")
-        print("[--] rvc-python no disponible (conversion basica)")
+        missing_optional.append("transformers")
+        print("[--] transformers no disponible (conversion de voz deshabilitada)")
+
+    from pathlib import Path
+    from config import HUBERT_DIR, RMVPE_PATH
+    if (Path(HUBERT_DIR) / "config.json").is_file() and Path(RMVPE_PATH).is_file():
+        print("[OK] Assets RVC (hubert_base, rmvpe) presentes")
+    else:
+        missing_optional.append("assets-rvc")
+        print("[--] Faltan assets RVC. Correr: python scripts/download_assets.py")
 
     if missing_optional:
         print(f"\n[Info] Paquetes opcionales no instalados: {', '.join(missing_optional)}")

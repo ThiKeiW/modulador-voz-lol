@@ -29,9 +29,24 @@ CHUNK_SIZE = 1024
 # que RVC-WebUI oficial (realtime_gui.py): block 250ms, crossfade SOLA 50ms,
 # contexto extra 2500ms para calidad del hubert/f0 (no es latencia de espera,
 # es historial ya cacheado). Latencia real por bloque ~ block_ms + computo.
-REALTIME_BLOCK_MS = 250
-REALTIME_CROSSFADE_MS = 50
-REALTIME_EXTRA_MS = 2500
+REALTIME_BLOCK_MS = 200  # 150 dejaba el COMPUTO sobrado (130-140ms) pero
+                          # el LOOP completo (poll de cola + write() +
+                          # overhead de Python/GIL, no solo el modelo) con
+                          # margen casi cero contra el budget -> cortes
+                          # medidos uno por bloque (ver waveform). 200 es
+                          # punto medio entre el 250 que se sentia lento y
+                          # el 150 que cortaba.
+REALTIME_CROSSFADE_MS = 80  # subido de 50; mas blend entre bloques =
+                             # transiciones menos abruptas/roboticas
+# OJO: esto NO es "esperar 2500ms" -- es cuanto historial de audio se le
+# vuelve a pasar a hubert+sintetizador en CADA bloque (no hay cache
+# incremental, se reprocesa toda la ventana extra+crossfade+block de
+# nuevo cada vez). Mas extra = mejor calidad/continuidad, pero el costo
+# de computo escala con esto. En una GPU de gama baja (ej. GTX 16xx,
+# fp16 deshabilitado por gpu_rules.py) es el primer lugar para bajar
+# latencia. Valores tipicos 1000-1500ms en GPUs chicas, hasta 2500-5000ms
+# en GPUs grandes. Si sigue lento, probar bajar a 500-800.
+REALTIME_EXTRA_MS = 1000
 
 # RVC settings
 DEFAULT_F0_METHOD = "rmvpe"  # rmvpe (recomendado, requiere rmvpe.pt), pm, harvest
@@ -39,6 +54,11 @@ DEFAULT_PITCH_SHIFT = 0  # semitones
 MAX_PITCH_SHIFT = 12
 MIN_PITCH_SHIFT = -12
 DEFAULT_INDEX_RATE = 0.5  # 0 = sin retrieval por indice, 1 = maximo
+
+# Imprime cuanto tarda cada etapa (hubert/f0/sintetizador/indice) por
+# bloque en consola. Prender mientras se ajusta latencia, apagar despues
+# (agrega print() por bloque).
+PROFILE_RVC = True
 
 # Assets compartidos de inferencia (no son parte de ningun personaje):
 # formato Transformers (NO el .pt original de fairseq), descargar con
@@ -52,7 +72,15 @@ DEFAULT_LANGUAGE = "es"  # Spanish
 TTS_SAMPLE_RATE = 24000
 
 # Device settings
-DEVICE = "cuda:0" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
+# OJO: CUDA_VISIBLE_DEVICES casi nunca esta seteado por default en una PC
+# normal (es una var para RESTRINGIR que GPU se ve, no para indicar que
+# hay una) -- con la condicion vieja esto daba "cpu" siempre, aunque haya
+# una GTX 1650 de sobra. Se detecta con torch.cuda.is_available() posta.
+try:
+    import torch as _torch
+    DEVICE = "cuda:0" if _torch.cuda.is_available() else "cpu"
+except ImportError:
+    DEVICE = "cpu"
 
 # Pre-trained model URLs (League of Legends)
 PRETRAINED_MODELS = {

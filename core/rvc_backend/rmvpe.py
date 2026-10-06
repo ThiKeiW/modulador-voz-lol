@@ -488,12 +488,14 @@ class RMVPE:
         if isinstance(is_half, str):
             is_half = is_half.lower() == "true"
         if device is None:
-            from configs.config import infer_device, infer_dtype
-
-            device = str(infer_device)
-            is_half = infer_dtype == torch.float16
+            # En este proyecto siempre se pasa device explicito (ver
+            # RVCEngine), asi que esta rama no deberia pisarse nunca.
+            # Fallback inofensivo en vez de importar el modulo
+            # configs.config de la WebUI oficial, que no vendorizamos.
+            device = "cpu"
+            is_half = False
         elif str(device).startswith("cuda"):
-            from configs.config import get_device_dtype_sm
+            from .gpu_rules import get_device_dtype_sm
 
             parsed_device = torch.device(device)
             device_index = parsed_device.index

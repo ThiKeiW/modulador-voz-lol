@@ -20,8 +20,6 @@ models/pretrained/**/*.mp3
 # HuBERT / assets grandes
 assets/hubert_base.pt
 models/assets/
-models/hubert_base
-models/rmvpe
 
 # Sistema / IDE
 .vscode/
