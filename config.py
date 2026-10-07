@@ -55,6 +55,15 @@ MAX_PITCH_SHIFT = 12
 MIN_PITCH_SHIFT = -12
 DEFAULT_INDEX_RATE = 0.5  # 0 = sin retrieval por indice, 1 = maximo
 
+# Silence gate (VAD simple por RMS) en ConversionThread: si el bloque de
+# entrada esta por debajo del umbral, se emite silencio directo SIN pasar
+# por hubert/f0/synth. En una prueba tipica ~80% de los bloques son
+# silencio (mic RMS 0.0000-0.0005 vs voz 0.003-0.015); sin gate cada uno
+# cuesta el computo completo (~660ms en CPU) y el atraso se acumula.
+# Al retomar voz se hace stream.reset() para no arrastrar estado viejo.
+SILENCE_GATE_ENABLED = True
+SILENCE_RMS_THRESHOLD = 0.002  # subir si el micro tiene mas ruido de fondo
+
 # Imprime cuanto tarda cada etapa (hubert/f0/sintetizador/indice) por
 # bloque en consola. Prender mientras se ajusta latencia, apagar despues
 # (agrega print() por bloque).

@@ -28,6 +28,8 @@ from config import (
     REALTIME_CROSSFADE_MS,
     REALTIME_EXTRA_MS,
     PROFILE_RVC,
+    SILENCE_GATE_ENABLED,
+    SILENCE_RMS_THRESHOLD,
 )
 from core.rvc_stream import RVCStream
 
@@ -55,6 +57,8 @@ class ConversionThread(QThread):
         block_ms: float = REALTIME_BLOCK_MS,
         crossfade_ms: float = REALTIME_CROSSFADE_MS,
         extra_ms: float = REALTIME_EXTRA_MS,
+        silence_gate_enabled: bool = SILENCE_GATE_ENABLED,
+        silence_threshold: float = SILENCE_RMS_THRESHOLD,
         parent=None,
     ):
         super().__init__(parent)
@@ -68,9 +72,12 @@ class ConversionThread(QThread):
         self.block_ms = block_ms
         self.crossfade_ms = crossfade_ms
         self.extra_ms = extra_ms
+        self.silence_gate_enabled = silence_gate_enabled
+        self.silence_threshold = silence_threshold
 
         self.running = False
         self.stream: Optional[RVCStream] = None
+        self._was_silent = False
 
     def run(self):
         if not self.rvc_engine.is_loaded():
@@ -121,9 +128,30 @@ class ConversionThread(QThread):
                     self.msleep(5)
                     continue
 
+                # RMS siempre (barato: ~9600 muestras) porque lo usa el
+                # silence gate; el print sigue solo con PROFILE_RVC.
+                rms_in = float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
                 if PROFILE_RVC:
-                    rms_in = float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
                     print(f"[RMS entrada] mic={rms_in:.4f} qsize~={self.audio_capture.audio_queue.qsize()}")
+
+                # Silence gate: bloque silencioso -> ceros directos al
+                # parlante SIN pasar por hubert/f0/synth. Se escribe
+                # exactamente un bloque (mismo largo que process()
+                # devolveria), asi el pacing del stream no se rompe.
+                if self.silence_gate_enabled and rms_in < self.silence_threshold:
+                    out_stream.write(np.zeros(len(chunk), dtype=np.float32))
+                    self.latency_updated.emit(0.0)
+                    self.level_updated.emit(0.0)
+                    self._was_silent = True
+                    continue
+
+                if self._was_silent:
+                    # Volvio la voz: limpiar estado viejo del stream
+                    # (buffers de entrada + sola_buffer + caches de pitch)
+                    # para que el primer bloque con voz no mezcle audio
+                    # rancio en el crossfade.
+                    self.stream.reset()
+                    self._was_silent = False
 
                 t_start = time.perf_counter()
                 try:
