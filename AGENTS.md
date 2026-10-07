@@ -116,13 +116,21 @@ Reverb/eco (`utils/audio_utils.py`), formant shift y noise-gate: descartados
 Pendiente minimo: exponer `index_rate` (hoy fijo 0.5 con indice / 0 sin el)
 como slider en la GUI.
 
-### Fase 7: Empaquetado ✅ `.exe` FUNCIONAL (2026-10-06)
+### Fase 7: Empaquetado ❌ CANCELADA (2026-10-06)
 
-`voicemod-lol.spec` (onedir, `console=True` para debug) + `build_exe.ps1`.
-Build con `.venv311` (Py3.11 + torch cu118): `dist/VoicemodLoL/`
-(~4.9GB: torch CUDA + transformers pesan). Smoke test: arranca y vive 30s+.
-Modelos/assets NO incluidos (se descargan aparte). Iconos y tests:
-descartados. Para build final sin consola: `console=False` en el spec.
+Cancelada a pedido del usuario: el proyecto aun tiene errores funcionales
+y no corresponde empaquetar. Se retiraron `voicemod-lol.spec` y
+`build_exe.ps1`. Iconos y tests: descartados.
+
+## Bugs Conocidos / Pendiente Funcional (2026-10-06)
+
+1. **Deteccion de voz en tiempo real no fluida**: la conversion en vivo
+   aun presenta problemas (cortes/trabas). Revisar pipeline
+   captura -> `RVCStream` -> salida antes de cualquier empaquetado.
+2. **Falta microfono virtual del sistema**: la salida convertida hoy solo
+   va al parlante; falta exponerla como dispositivo de entrada de Windows
+   (para Discord, llamadas, etc.). Requiere driver virtual (ej. VB-CABLE)
+   o similar + ruteo en `ConversionThread`.
 
 ---
 
