@@ -303,6 +303,43 @@ class RVCEngine:
     # Inferencia (llamada por core/rvc_stream.py con la ventana ya armada)
     # ------------------------------------------------------------------
 
+    def warmup(
+        self,
+        input_len_16k: int,
+        block_frame_16k: int,
+        skip_head,
+        return_length,
+        f0_method: str = "rmvpe",
+        index_rate: float = 0.0,
+    ) -> float:
+        """Pasa ceros por el pipeline completo UNA vez: construye RMVPE
+        (carga de pesos lenta la primera vez) y calienta kernels CUDA, para
+        que el primer bloque con voz real no pague ese costo en vivo
+        (medido: ~35-39s en el primer bloque con voz sin esto).
+        Llamar despues de crear el RVCStream, con SU geometria
+        (ver core/rvc_stream.py). Devuelve los ms que tardo."""
+        if not self.is_loaded():
+            raise RuntimeError("No hay modelo RVC cargado")
+        t0 = time.perf_counter()
+        logger.info("[RVCEngine] Warmup: primera inferencia (tarda solo esta vez)...")
+        dummy = torch.zeros(input_len_16k, device=self.device, dtype=torch.float32)
+        self.infer(
+            dummy,
+            block_frame_16k,
+            skip_head,
+            return_length,
+            f0_method=f0_method,
+            f0_up_key=0,
+            index_rate=index_rate,
+        )
+        ms = (time.perf_counter() - t0) * 1000
+        logger.info(f"[RVCEngine] Warmup OK en {ms:.0f}ms")
+        # Caches limpios para que la sesion real arranque sin arrastrar
+        # el pitch del dummy.
+        self.cache_pitch.zero_()
+        self.cache_pitchf.zero_()
+        return ms
+
     def infer(
         self,
         input_wav_16k: torch.Tensor,

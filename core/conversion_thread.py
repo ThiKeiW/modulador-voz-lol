@@ -101,6 +101,20 @@ class ConversionThread(QThread):
             # tasa del dispositivo, no es un numero fijo).
             self.audio_capture.chunk_size = self.stream.block_frame
 
+            # Warmup: la primera inferencia (construccion de RMVPE + kernels
+            # CUDA frios) tarda decenas de segundos. Se paga aca --con la
+            # GUI avisando via status-- en vez de en el primer bloque con
+            # voz, donde se sentiria como "tarda en detectar el microfono".
+            self.status_changed.emit("calentando")
+            self.rvc_engine.warmup(
+                len(self.stream.input_wav_res),
+                self.stream.block_frame_16k,
+                self.stream.skip_head,
+                self.stream.return_length,
+                f0_method=self.f0_method,
+                index_rate=self.index_rate,
+            )
+
             self.audio_capture.start(device_index=self.device_index)
 
             out_stream = sd.OutputStream(
