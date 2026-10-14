@@ -161,11 +161,90 @@ class MainWindow(QMainWindow):
         self._add_character_button("Briar", "briar_latino", "Espanol Latino")
         self._add_character_button("Yuumi", "yuumi_latino", "Espanol Latino")
 
+        # Grupo de personalizados (dinamico, desde ModelManager)
+        self.customs_title = QLabel("PERSONALIZADOS")
+        self.customs_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        self.customs_title.setStyleSheet("color: #e94560; padding: 5px;")
+        self.customs_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.customs_title)
+        self.customs_layout = QVBoxLayout()
+        self.customs_layout.setSpacing(8)
+        layout.addLayout(self.customs_layout)
+        self._refresh_custom_buttons()
+
         layout.addStretch()
 
         return panel
 
-    def _add_character_button(self, name: str, model_id: str, subtitle: str):
+    def _refresh_custom_buttons(self):
+        """Reconstruye el grupo Personalizados desde el ModelManager."""
+        while self.customs_layout.count():
+            item = self.customs_layout.takeAt(0)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.deleteLater()
+            lay = item.layout() if item is not None else None
+            if lay is not None:
+                while lay.count():
+                    sub = lay.takeAt(0)
+                    if sub.widget() is not None:
+                        sub.widget().deleteLater()
+                lay.deleteLater()
+
+        customs = [
+            m for m in self.model_manager.get_downloaded_models()
+            if m.is_custom
+        ]
+        self.customs_title.setVisible(bool(customs))
+        for m in customs:
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            sub = m.language + ("" if m.index_path else " · sin índice")
+            self._add_character_button(m.name, m.id, sub, target=row)
+            delete_btn = QPushButton("✕")
+            delete_btn.setFixedSize(32, 50)
+            delete_btn.setToolTip(f"Eliminar '{m.name}'")
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #16213e;
+                    color: #7b7b9e;
+                    border: 2px solid #1a1a3e;
+                    border-radius: 6px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { color: #e94560; border-color: #e94560; }
+            """)
+            delete_btn.clicked.connect(
+                lambda checked, mid=m.id, mname=m.name: self._on_delete_custom(mid, mname)
+            )
+            row.addWidget(delete_btn)
+            self.customs_layout.addLayout(row)
+
+    def _on_delete_custom(self, model_id: str, name: str):
+        """Elimina un custom con confirmacion."""
+        ans = QMessageBox.question(
+            self, "Eliminar modelo",
+            f"¿Eliminar '{name}'? Se borran sus archivos.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        if self.model_manager.delete_model(model_id):
+            if self.selected_model_id == model_id:
+                self.selected_model_id = None
+                self.character_header.setText("Selecciona un personaje")
+            if self.loaded_model_id == model_id:
+                self.loaded_model_id = None
+                if self.rvc_engine is not None and hasattr(self.rvc_engine, "unload_model"):
+                    try:
+                        self.rvc_engine.unload_model()
+                    except Exception:
+                        pass
+            self.log(f"Modelo '{name}' eliminado.")
+            self._refresh_custom_buttons()
+
+    def _add_character_button(self, name: str, model_id: str, subtitle: str, target=None):
         """Agrega un boton de personaje a la lista."""
         btn = QPushButton(f"  {name}\n  {subtitle}")
         btn.setMinimumHeight(50)
@@ -191,7 +270,8 @@ class MainWindow(QMainWindow):
         """)
         btn.clicked.connect(lambda checked, mid=model_id: self._select_character(mid))
         btn.setObjectName(f"char_{model_id}")
-        self.character_list.addWidget(btn)
+        (target if target is not None else self.character_list).addWidget(btn)
+        return btn
 
     def _create_right_panel(self) -> QFrame:
         """Crea el panel derecho con controles y visualizador."""
@@ -695,11 +775,16 @@ class MainWindow(QMainWindow):
             self.log(f"[Aviso] No se pudo registrar '{model_id}', revisa la descarga.")
 
     def _on_import_model(self):
-        """Importa un modelo externo."""
-        QMessageBox.information(
-            self, "Importar Modelo",
-            "Selecciona un archivo .pth para importar como modelo custom."
-        )
+        """Abre el dialogo de importacion de customs."""
+        from gui.import_dialog import ImportDialog
+        dialog = ImportDialog(self, self.model_manager, on_imported=self._on_model_imported)
+        dialog.exec()
+
+    def _on_model_imported(self, model_id: str):
+        """Refresca el panel tras importar y deja seleccionado el custom."""
+        self.log(f"Modelo '{model_id}' importado y listo (sin reiniciar).")
+        self._refresh_custom_buttons()
+        self._select_character(model_id)
 
     def _on_audio_settings(self):
         """Configuracion de audio."""

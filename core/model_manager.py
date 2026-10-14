@@ -181,6 +181,30 @@ class ModelManager:
 
         urllib.request.urlretrieve(url, str(save_path), _reporthook)
 
+    def inspect_rvc_checkpoint(self, model_path: str) -> dict:
+        """Chequeo rapido de un .pth: verifica que sea checkpoint RVC real
+        (keys 'weight' + 'config') y extrae version/f0/sr para metadata.
+        Lanza ValueError con el motivo si no sirve. No instancia el modelo,
+        solo lee el archivo."""
+        import torch
+
+        ck = None
+        try:
+            try:
+                ck = torch.load(model_path, map_location="cpu", weights_only=True)
+            except Exception:
+                ck = torch.load(model_path, map_location="cpu", weights_only=False)
+        except Exception as e:
+            raise ValueError(f"No se pudo leer el archivo: {e}")
+        if not isinstance(ck, dict) or "weight" not in ck or "config" not in ck:
+            raise ValueError("No es un checkpoint RVC (faltan 'weight'/'config')")
+        cfg = ck.get("config") or []
+        return {
+            "version": ck.get("version", "v1"),
+            "f0": ck.get("f0", 1),
+            "sr": ck.get("sr", cfg[-1] if cfg else "?"),
+        }
+
     def save_custom_model(
         self,
         model_path: str,
@@ -189,21 +213,33 @@ class ModelManager:
         language: str = "Español Latino",
         pitch_base: int = 0,
         description: str = "",
+        index_path: str = "",
     ) -> str:
         """
-        Guarda un modelo entrenado como personalizado.
+        Guarda un modelo entrenado como personalizado (.pth obligatorio,
+        .index opcional para retrieval). Valida el checkpoint y autodetecta
+        version/f0/sr para la metadata.
 
         Returns:
             ID del modelo guardado
         """
+        info = self.inspect_rvc_checkpoint(model_path)
+        if index_path and not Path(index_path).is_file():
+            raise ValueError(f"Indice no encontrado: {index_path}")
+
         # Crear directorio
         safe_name = name.lower().replace(" ", "_").replace("/", "_")
         model_dir = CUSTOM_DIR / safe_name
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copiar modelo
+        # Copiar modelo (+ indice si hay)
         dest_path = model_dir / Path(model_path).name
         shutil.copy2(model_path, dest_path)
+        dest_index = ""
+        if index_path:
+            dest_index = model_dir / Path(index_path).name
+            shutil.copy2(index_path, dest_index)
+            dest_index = str(dest_index)
 
         # Guardar metadata
         metadata = {
@@ -212,6 +248,9 @@ class ModelManager:
             "language": language,
             "pitch_base": pitch_base,
             "description": description,
+            "rvc_version": info["version"],
+            "f0": info["f0"],
+            "sr": info["sr"],
         }
         meta_file = model_dir / "metadata.json"
         with open(meta_file, "w", encoding="utf-8") as f:
@@ -229,6 +268,7 @@ class ModelManager:
             description=description,
             is_custom=True,
             downloaded=True,
+            index_path=dest_index,
         )
 
         return model_id
