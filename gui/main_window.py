@@ -237,6 +237,10 @@ class MainWindow(QMainWindow):
         controls_group = self._create_voice_controls()
         layout.addWidget(controls_group)
 
+        # Salida para Discord / llamadas (microfono virtual)
+        output_group = self._create_output_group()
+        layout.addWidget(output_group)
+
         # Visualizador de audio
         vis_label = QLabel("VISUALIZADOR DE AUDIO")
         vis_label.setStyleSheet("color: #7b7b9e; font-size: 10px; padding-top: 5px;")
@@ -407,6 +411,141 @@ class MainWindow(QMainWindow):
 
         return group
 
+    def _create_output_group(self) -> QGroupBox:
+        """Selector de salida para usar la voz como microfono virtual
+        (Discord/llamadas) via cable virtual (VB-CABLE)."""
+        from core.audio_devices import (
+            list_output_devices,
+            find_cable_playback,
+            find_cable_mic,
+        )
+        self._audio_device_helpers = (list_output_devices, find_cable_playback, find_cable_mic)
+
+        group = QGroupBox("Salida para Discord / llamadas")
+        group.setStyleSheet("""
+            QGroupBox {
+                background-color: #16213e;
+                border: 1px solid #1a1a3e;
+                border-radius: 6px;
+                padding: 12px;
+                margin-top: 8px;
+                color: #e0e0e0;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 5px;
+            }
+        """)
+        layout = QVBoxLayout(group)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Reproducir voz en:"))
+        self.output_combo = QComboBox()
+        self.output_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1a1a2e;
+                color: #e0e0e0;
+                border: 1px solid #1a1a3e;
+                border-radius: 4px;
+                padding: 6px 10px;
+                min-height: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1a2e;
+                color: #e0e0e0;
+                selection-background-color: #e94560;
+            }
+        """)
+        row.addWidget(self.output_combo, 1)
+        layout.addLayout(row)
+
+        self.cable_hint = QLabel("")
+        self.cable_hint.setWordWrap(True)
+        self.cable_hint.setStyleSheet("color: #7b7b9e; font-size: 10px;")
+        layout.addWidget(self.cable_hint)
+
+        btn_row = QHBoxLayout()
+        self.use_cable_btn = QPushButton("Usar cable virtual")
+        self.use_cable_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #533483;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #7b2cbf; }
+            QPushButton:disabled { background-color: #444; color: #888; }
+        """)
+        self.use_cable_btn.clicked.connect(self._on_use_cable_click)
+        btn_row.addWidget(self.use_cable_btn)
+
+        refresh_btn = QPushButton("Refrescar")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1a1a2e;
+                color: #7b7b9e;
+                border: 1px solid #16213e;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 10px;
+            }
+            QPushButton:hover { background-color: #16213e; color: #e0e0e0; }
+        """)
+        refresh_btn.clicked.connect(self._refresh_output_devices)
+        btn_row.addWidget(refresh_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        self._cable_index = None
+        self._refresh_output_devices()
+        return group
+
+    def _refresh_output_devices(self):
+        """Lista salidas y detecta cable virtual instalado."""
+        list_outputs, find_playback, find_mic = self._audio_device_helpers
+        self.output_combo.clear()
+        self.output_combo.addItem("Predeterminado del sistema", None)
+        for index, name in list_outputs():
+            # Evitar duplicados con distinto host API que confunden.
+            if self.output_combo.findText(name) < 0:
+                self.output_combo.addItem(name, index)
+
+        self._cable_index = find_playback()
+        mic_name = find_mic()
+        if self._cable_index is not None:
+            self.cable_hint.setStyleSheet("color: #4ecca3; font-size: 10px;")
+            self.cable_hint.setText(
+                "Cable virtual detectado. Pulsa 'Usar cable virtual' y en "
+                f"Discord/Windows elige como microfono '{mic_name or 'CABLE Output'}'."
+            )
+            self.use_cable_btn.setEnabled(True)
+        else:
+            self.cable_hint.setStyleSheet("color: #e0b34e; font-size: 10px;")
+            self.cable_hint.setText(
+                "Sin cable virtual: instala VB-CABLE (vb-audio.com/Cable) "
+                "como administrador y pulsa Refrescar."
+            )
+            self.use_cable_btn.setEnabled(False)
+
+    def _on_use_cable_click(self):
+        """Selecciona el cable virtual como salida."""
+        if self._cable_index is None:
+            return
+        idx = self.output_combo.findData(self._cable_index)
+        if idx >= 0:
+            self.output_combo.setCurrentIndex(idx)
+            self.log(f"Salida -> cable virtual ({self.output_combo.currentText()})")
+
+    def _selected_output_device(self):
+        """Indice sounddevice de salida o None (predeterminado)."""
+        return self.output_combo.currentData()
+
     def _setup_menu(self):
         """Configura la barra de menus."""
         menubar = self.menuBar()
@@ -518,9 +657,12 @@ class MainWindow(QMainWindow):
         if self.audio_capture is None:
             self.audio_capture = AudioCapture()
 
+        out_dev = self._selected_output_device()
+        self.log(f"Salida de voz -> {self.output_combo.currentText()}")
         self.conversion_thread = ConversionThread(
             audio_capture=self.audio_capture,
             rvc_engine=self.rvc_engine,
+            output_device=out_dev,
             pitch_shift=self.pitch_slider.value(),
             f0_method=self.f0_combo.currentText(),
             index_rate=DEFAULT_INDEX_RATE if model.index_path else 0.0,
