@@ -23,7 +23,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from config import DEVICE, HUBERT_DIR, RMVPE_PATH, PROFILE_RVC
+from config import DEVICE, HUBERT_DIR, RMVPE_PATH, PROFILE_RVC, CUDNN_BENCHMARK
 
 from core.rvc_backend.hubert import extract_hubert_features, load_hubert_model
 from core.rvc_backend.cuda_graph import run_cuda_graph
@@ -109,6 +109,8 @@ class RVCEngine:
         wants_cuda = device not in (None, "cpu")
         self.device = torch.device(device if (wants_cuda and cuda_ok) else ("cuda:0" if cuda_ok else "cpu"))
         self.is_half = is_half and self.device.type == "cuda"
+        if self.device.type == "cuda":
+            torch.backends.cudnn.benchmark = bool(CUDNN_BENCHMARK)
 
         self.hubert_model = None  # compartido entre personajes, se carga 1 vez
         self.net_g = None

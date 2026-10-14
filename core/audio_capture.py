@@ -37,6 +37,7 @@ class AudioCapture:
         self._thread: Optional[threading.Thread] = None
         self._read_chunk = self._READ_CHUNK_DEFAULT
         self._overflow_count = 0
+        self.dropped_chunks = 0  # bloques tirados porque la cola estaba llena (consumidor atrasado)
         self._callback: Optional[Callable] = None
 
     def _init_pyaudio(self):
@@ -135,6 +136,7 @@ class AudioCapture:
                     if self.audio_queue.full():
                         try:
                             self.audio_queue.get_nowait()
+                            self.dropped_chunks += 1
                         except queue.Empty:
                             pass
                     self.audio_queue.put(audio_chunk)

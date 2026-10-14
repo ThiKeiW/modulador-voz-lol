@@ -67,7 +67,41 @@ SILENCE_RMS_THRESHOLD = 0.002  # subir si el micro tiene mas ruido de fondo
 # Imprime cuanto tarda cada etapa (hubert/f0/sintetizador/indice) por
 # bloque en consola. Prender mientras se ajusta latencia, apagar despues
 # (agrega print() por bloque).
-PROFILE_RVC = True
+PROFILE_RVC = False
+
+# Salida de audio (core/audio_output.py). El hilo de conversion hace push()
+# sin bloquear y un callback de PortAudio consume.
+# - OUTPUT_PREFILL_MS: colchon de silencio antes del primer bloque (y
+#   tras cada underrun). Absorbe el jitter del computo (~125-165ms por
+#   bloque de 200ms). Mas alto = menos huecos, pero suma latencia 1:1.
+# - OUTPUT_MAX_BUFFER_MS: tope; si se acumula mas, se tira lo mas viejo.
+# - OUTPUT_LATENCY: buffer interno de PortAudio (s).
+OUTPUT_PREFILL_MS = 60
+OUTPUT_MAX_BUFFER_MS = 800
+OUTPUT_LATENCY = 0.05
+
+# Drenaje de latencia (core/conversion_thread.py): si el buffer de salida
+# acumula mas de OUTPUT_PREFILL_MS + OUTPUT_TRIM_SLACK_MS (pasa cuando un
+# pico de calculo hace que el hilo "se ponga al dia" mas rapido que tiempo
+# real), se acorta el silencio de las pausas hasta volver al colchon. Solo
+# toca bloques que el silence-gate ya marco como silencio: no altera voz.
+OUTPUT_TRIM_SLACK_MS = 40
+
+# torch.backends.cudnn.benchmark: elige el algoritmo de convolucion mas
+# rapido para los tamanos fijos de nuestras ventanas (se calibra en el
+# warmup). Resultado numerico equivalente. Si no mejora el computo por
+# bloque (medir con PROFILE_RVC=True) se puede apagar.
+CUDNN_BENCHMARK = True
+
+# EXPERIMENTO (opt-in): durante el silencio el gate no usa la GPU y el
+# primer bloque con voz tras una pausa tarda ~300-415ms (vs ~135 en
+# regimen). Hipotesis: la GPU baja de reloj en idle. Con esto se lanza un
+# matmul chico cada ~30ms mientras hay silencio para mantenerla despierta.
+# Costo: algo de consumo en pausas. Para validar: comparar cuantas lineas
+# "Computo Xms > block" salen al empezar a hablar con y sin esto.
+GPU_KEEPALIVE = False
+GPU_KEEPALIVE_INTERVAL_MS = 30
+
 
 # Assets compartidos de inferencia (no son parte de ningun personaje):
 # formato Transformers (NO el .pt original de fairseq), descargar con

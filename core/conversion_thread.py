@@ -17,7 +17,7 @@ import traceback
 from typing import Optional
 
 import numpy as np
-import sounddevice as sd
+import torch
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from config import (
@@ -30,7 +30,14 @@ from config import (
     PROFILE_RVC,
     SILENCE_GATE_ENABLED,
     SILENCE_RMS_THRESHOLD,
+    OUTPUT_PREFILL_MS,
+    OUTPUT_MAX_BUFFER_MS,
+    OUTPUT_LATENCY,
+    OUTPUT_TRIM_SLACK_MS,
+    GPU_KEEPALIVE,
+    GPU_KEEPALIVE_INTERVAL_MS,
 )
+from core.audio_output import StreamingOutput
 from core.rvc_stream import RVCStream
 
 
@@ -117,30 +124,61 @@ class ConversionThread(QThread):
 
             self.audio_capture.start(device_index=self.device_index)
 
-            out_stream = sd.OutputStream(
-                samplerate=self.audio_capture.sample_rate,
-                channels=1,
-                dtype="float32",
+            # Salida desacoplada (callback + colchon): el hilo solo hace
+            # push(), no se bloquea esperando al parlante. Ver
+            # core/audio_output.py para el por que.
+            out_stream = StreamingOutput(
+                sample_rate=self.audio_capture.sample_rate,
                 device=self.output_device,
-                # "low" le pide a WASAPI el buffer MAS CHICO posible --
-                # practicamente cero margen entre un write() y el
-                # siguiente. Con el loop entero (poll de cola + write +
-                # GIL) compitiendo por CPU con el computo real, eso es
-                # casi garantia de underrun justo en el borde de cada
-                # bloque (coincide con los cortes medidos en el waveform,
-                # uno por bloque). 100ms de buffer le da a PortAudio
-                # colchon real sin agregar latencia perceptible.
-                latency=0.1,
+                prefill_ms=OUTPUT_PREFILL_MS,
+                max_buffer_ms=OUTPUT_MAX_BUFFER_MS,
+                latency=OUTPUT_LATENCY,
             )
             out_stream.start()
+            last_report = time.monotonic()
+            last_counts = (0, 0, 0, 0, 0)
+            trimmed_ms = 0.0
+
+            keep_a = None
+            last_keep = 0.0
+            keep_every = GPU_KEEPALIVE_INTERVAL_MS / 1000.0
+            if GPU_KEEPALIVE and self.rvc_engine.device.type == "cuda":
+                keep_a = torch.randn(1024, 1024, device=self.rvc_engine.device)
 
             self.status_changed.emit("corriendo")
 
             while self.running:
                 chunk = self.audio_capture.get_chunk()
                 if chunk is None:
+                    if keep_a is not None and self._was_silent:
+                        t_k = time.monotonic()
+                        if t_k - last_keep >= keep_every:
+                            last_keep = t_k
+                            keep_a @ keep_a  # lanzamiento asincrono, no espera
                     self.msleep(5)
                     continue
+
+                now = time.monotonic()
+                if now - last_report >= 5.0:
+                    last_report = now
+                    counts = (
+                        out_stream.audible_underruns,
+                        out_stream.underruns,
+                        out_stream.device_underflows,
+                        self.audio_capture.dropped_chunks,
+                        out_stream.dropped_frames,
+                    )
+                    if counts != last_counts:
+                        last_counts = counts
+                        print(
+                            f"[Diag] salida: huecos_en_voz={counts[0]} "
+                            f"(underruns_totales={counts[1]}) "
+                            f"underflows_dispositivo={counts[2]} | entrada: "
+                            f"bloques_descartados={counts[3]} | "
+                            f"muestras_tiradas_por_tope={counts[4]} | "
+                            f"silencio_recortado={trimmed_ms:.0f}ms | "
+                            f"buffer={out_stream.buffered_ms:.0f}ms"
+                        )
 
                 # RMS siempre (barato: ~9600 muestras) porque lo usa el
                 # silence gate; el print sigue solo con PROFILE_RVC.
@@ -153,7 +191,16 @@ class ConversionThread(QThread):
                 # exactamente un bloque (mismo largo que process()
                 # devolveria), asi el pacing del stream no se rompe.
                 if self.silence_gate_enabled and rms_in < self.silence_threshold:
-                    out_stream.write(np.zeros(len(chunk), dtype=np.float32))
+                    n = len(chunk)
+                    excess_ms = out_stream.buffered_ms - (
+                        out_stream.prefill_ms + OUTPUT_TRIM_SLACK_MS
+                    )
+                    if excess_ms > 0:
+                        drop = min(n, int(excess_ms * out_stream.sample_rate / 1000))
+                        n -= drop
+                        trimmed_ms += 1000.0 * drop / out_stream.sample_rate
+                    if n > 0:
+                        out_stream.push(np.zeros(n, dtype=np.float32), audible=False)
                     self.latency_updated.emit(0.0)
                     self.level_updated.emit(0.0)
                     self._was_silent = True
@@ -183,11 +230,7 @@ class ConversionThread(QThread):
                     continue
 
                 # Medir SOLO el computo (process()) para decidir si vamos
-                # atrasados -- lo que sigue (write) bloquea esperando que
-                # el parlante tenga espacio, eso es pacing normal, no
-                # computo de mas, y mezclarlo en la misma metrica confunde
-                # (processing real puede ir sobrado y este numero igual
-                # da por encima de block_ms).
+                # atrasados.
                 compute_ms = (time.perf_counter() - t_start) * 1000
 
                 converted = np.ascontiguousarray(converted, dtype=np.float32)
@@ -205,13 +248,13 @@ class ConversionThread(QThread):
                     rms_end = float(np.sqrt(np.mean(np.square(converted[2*third:]))))
                     print(f"[RMS bloque] inicio={rms_start:.4f} medio={rms_mid:.4f} fin={rms_end:.4f}")
 
-                out_stream.write(converted)
+                out_stream.push(converted)
 
                 self.latency_updated.emit(compute_ms)
                 if compute_ms > self.block_ms:
                     # Esto si importa: el computo solo ya no entra en el
                     # tiempo del bloque -> se va a acumular atraso de
-                    # verdad (el write ya no alcanza a compensarlo).
+                    # verdad (la cola de entrada empieza a descartar).
                     print(f"[ConversionThread] Computo {compute_ms:.0f}ms > block {self.block_ms:.0f}ms (vas atras)")
 
                 rms = float(np.sqrt(np.mean(np.square(converted)))) if converted.size else 0.0
@@ -223,7 +266,6 @@ class ConversionThread(QThread):
             if out_stream is not None:
                 try:
                     out_stream.stop()
-                    out_stream.close()
                 except Exception:
                     pass
             try:

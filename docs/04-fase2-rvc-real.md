@@ -254,3 +254,71 @@ python main.py
 Seleccionar un personaje descargado -> Iniciar. Recomendado probar
 primero con Aatrox o Ezreal (tienen `.index`, deberia sonar mejor que
 Briar/Yuumi por ahora).
+
+## Causa de los cortes: salida bloqueante (no eran los prints)
+
+Con `PROFILE_RVC=False` el patron de huecos siguio igual (video
+2026-10-09 17:02): tramos de voz de ~200ms, huecos de 52-74ms (igual a
+-35dB y -50dB, silencio digital real), periodo ~268ms. Los prints a
+consola no eran la causa.
+
+Explicacion que reproduce los tres numeros: el hilo hacia
+`computo (~150ms) + sd.OutputStream.write()` en serie. Un `write()` de
+200ms solo retorna cuando el buffer del dispositivo (~80-100ms) deja
+espacio, o sea espera ~100ms extra en vez de solaparla con la
+reproduccion. Ciclo ~265ms contra un mic que entrega un bloque cada
+200ms:
+- el buffer del parlante se vacia ~65ms entre bloques -> hueco audible
+- la cola de entrada (maxsize=2) se satura y descarta -> contenido
+  perdido (`qsize~=1` constante en los logs)
+
+Simulacion de eventos (1ms) con computo 125-165ms y buffer efectivo de
+80ms: modelo viejo = tramos 200ms / hueco 66ms / periodo 265ms / ~5
+bloques descartados cada 6s; modelo nuevo = 0 underruns, 0 descartes.
+
+Fix: `core/audio_output.py::StreamingOutput`. El hilo de conversion solo
+hace `push()` (no bloquea); un callback de PortAudio consume de un buffer
+con colchon inicial (`OUTPUT_PREFILL_MS`, tambien tras cada underrun) y
+tope (`OUTPUT_MAX_BUFFER_MS`). El silence-gate empuja ceros para que el
+buffer siga alimentado. Diagnostico barato cada 5s solo si cambia:
+`[Diag] salida: underruns=... | entrada: bloques_descartados=...`.
+
+Costo: `OUTPUT_PREFILL_MS` suma latencia 1:1 (60ms por defecto). Latencia
+total esperada mic->oido ~ 200 (bloque) + ~150 (computo) + 60 (colchon)
++ 50 (dispositivo).
+
+## Validacion de la salida desacoplada y drenaje de latencia
+
+Videos 2026-10-12 con `OUTPUT_PREFILL_MS` = 120 y 60: voz continua en
+ambos (2.93s y 2.98s), sin huecos >=20ms a -40dB. Los huecos de ~65ms
+desaparecieron. 60ms alcanza; 120ms solo suma latencia.
+
+Hallazgo en el `[Diag]` (buffer=431ms con prefill 120, esperado ~270): el
+buffer de salida solo puede crecer. Un pico de calculo (el primer bloque
+con voz tras una pausa tarda ~300-415ms) deja la cola de entrada con 1-2
+bloques; el hilo los procesa mas rapido que tiempo real (~150ms por
+200ms de audio) y empuja audio mas rapido de lo que suena. La diferencia
+queda como latencia fija. Una simulacion con habla/pausas y picos de
+arranque da ~415ms de buffer sostenido, igual a lo medido.
+
+Cambios (sin tocar voz):
+- Drenaje: en bloques que el silence-gate ya marco como silencio, se
+  acorta el relleno hasta volver a `OUTPUT_PREFILL_MS +
+  OUTPUT_TRIM_SLACK_MS`. Solo actua en pausas; dentro de una frase el
+  buffer sigue alto hasta la siguiente pausa.
+- `[Diag]`: `huecos_en_voz` cuenta solo los underruns que cortaron voz;
+  `underruns_totales` incluye los inocuos (el pico al arrancar a hablar
+  ocurre sobre silencio). Se agrega `silencio_recortado`.
+- `CUDNN_BENCHMARK` (default True): algoritmo de convolucion mas rapido
+  para los tamanos fijos de las ventanas. Sin medir en hardware.
+- `GPU_KEEPALIVE` (default False, experimento): hipotesis de que la GPU
+  baja de reloj durante el silencio y causa el pico de arranque. En el
+  unico perfil con voz tras warmup, resample (51 vs 2ms), hubert (94 vs
+  18ms) y f0 (96 vs 47ms) tardan 2-25x pero synth (57ms) es normal; eso
+  es compatible con reloj bajo pero no lo prueba. Para validar: comparar
+  cuantas lineas "Computo Xms > block" salen al empezar a hablar.
+
+Latencia mic->oido estimada con la config actual: ~100 (espera media de
+bloque) + ~150 (calculo) + 60 (colchon) + ~50 (dispositivo) = ~360ms
+promedio, ~460ms peor caso. Piso del diseno por bloques; bajarlo mas sin
+tocar calidad requiere reducir el calculo por bloque, no los buffers.
