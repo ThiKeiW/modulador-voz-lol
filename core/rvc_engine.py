@@ -59,7 +59,8 @@ def get_synthesizer(pth_path, device=torch.device("cpu")):
     """Carga un .pth original de RVC y arma la arquitectura correcta
     (v1/256 vs v2/768, con/sin f0) segun los metadatos del propio checkpoint.
     Identico a infer/rtrvc.py::get_synthesizer del repo oficial."""
-    cpt = torch.load(pth_path, map_location=torch.device("cpu"), weights_only=False)
+    from core.ckpt_compat import load_ckpt_tolerant
+    cpt = load_ckpt_tolerant(pth_path)
     cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]
     if_f0 = cpt.get("f0", 1)
     version = cpt.get("version", "v1")

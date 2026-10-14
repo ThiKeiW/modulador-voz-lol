@@ -186,24 +186,15 @@ class ModelManager:
         (keys 'weight' + 'config') y extrae version/f0/sr para metadata.
         Lanza ValueError con el motivo si no sirve. No instancia el modelo,
         solo lee el archivo."""
-        import torch
+        from core.ckpt_compat import load_ckpt_tolerant, normalize_ckpt_meta
 
-        ck = None
         try:
-            try:
-                ck = torch.load(model_path, map_location="cpu", weights_only=True)
-            except Exception:
-                ck = torch.load(model_path, map_location="cpu", weights_only=False)
+            ck = load_ckpt_tolerant(model_path)
         except Exception as e:
             raise ValueError(f"No se pudo leer el archivo: {e}")
         if not isinstance(ck, dict) or "weight" not in ck or "config" not in ck:
             raise ValueError("No es un checkpoint RVC (faltan 'weight'/'config')")
-        cfg = ck.get("config") or []
-        return {
-            "version": ck.get("version", "v1"),
-            "f0": ck.get("f0", 1),
-            "sr": ck.get("sr", cfg[-1] if cfg else "?"),
-        }
+        return normalize_ckpt_meta(ck)
 
     def save_custom_model(
         self,

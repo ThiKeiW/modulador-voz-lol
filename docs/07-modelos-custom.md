@@ -43,5 +43,10 @@ personaje en el panel (pide confirmacion y borra la carpeta).
 
 - "No es un checkpoint RVC": el `.pth` elegido no trae keys
   `weight`/`config` (archivo corrupto o de otro formato).
+- Checkpoints de **Ultimate RVC**: traen clases propias pickladas
+  (`ultimate_rvc.typing_extra.TrainingSampleRate`) que `torch.load`
+  normal rechaza. La app los convierte sola al importar
+  (`core/ckpt_compat.py`) y guarda copia normalizada; no necesitas
+  nada de Ultimate RVC instalado.
 - El personaje no aparece: revisa el log de la app; el registro exige
   al menos un `.pth` en su carpeta.
