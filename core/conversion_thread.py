@@ -17,7 +17,6 @@ import traceback
 from typing import Optional
 
 import numpy as np
-import torch
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from config import (
@@ -28,14 +27,9 @@ from config import (
     REALTIME_CROSSFADE_MS,
     REALTIME_EXTRA_MS,
     PROFILE_RVC,
-    SILENCE_GATE_ENABLED,
-    SILENCE_RMS_THRESHOLD,
     OUTPUT_PREFILL_MS,
     OUTPUT_MAX_BUFFER_MS,
     OUTPUT_LATENCY,
-    OUTPUT_TRIM_SLACK_MS,
-    GPU_KEEPALIVE,
-    GPU_KEEPALIVE_INTERVAL_MS,
 )
 from core.audio_output import StreamingOutput
 from core.rvc_stream import RVCStream
@@ -64,8 +58,6 @@ class ConversionThread(QThread):
         block_ms: float = REALTIME_BLOCK_MS,
         crossfade_ms: float = REALTIME_CROSSFADE_MS,
         extra_ms: float = REALTIME_EXTRA_MS,
-        silence_gate_enabled: bool = SILENCE_GATE_ENABLED,
-        silence_threshold: float = SILENCE_RMS_THRESHOLD,
         parent=None,
     ):
         super().__init__(parent)
@@ -79,12 +71,9 @@ class ConversionThread(QThread):
         self.block_ms = block_ms
         self.crossfade_ms = crossfade_ms
         self.extra_ms = extra_ms
-        self.silence_gate_enabled = silence_gate_enabled
-        self.silence_threshold = silence_threshold
 
         self.running = False
         self.stream: Optional[RVCStream] = None
-        self._was_silent = False
 
     def run(self):
         if not self.rvc_engine.is_loaded():
@@ -136,25 +125,13 @@ class ConversionThread(QThread):
             )
             out_stream.start()
             last_report = time.monotonic()
-            last_counts = (0, 0, 0, 0, 0)
-            trimmed_ms = 0.0
-
-            keep_a = None
-            last_keep = 0.0
-            keep_every = GPU_KEEPALIVE_INTERVAL_MS / 1000.0
-            if GPU_KEEPALIVE and self.rvc_engine.device.type == "cuda":
-                keep_a = torch.randn(1024, 1024, device=self.rvc_engine.device)
+            last_counts = (0, 0, 0, 0)
 
             self.status_changed.emit("corriendo")
 
             while self.running:
                 chunk = self.audio_capture.get_chunk()
                 if chunk is None:
-                    if keep_a is not None and self._was_silent:
-                        t_k = time.monotonic()
-                        if t_k - last_keep >= keep_every:
-                            last_keep = t_k
-                            keep_a @ keep_a  # lanzamiento asincrono, no espera
                     self.msleep(5)
                     continue
 
@@ -175,44 +152,15 @@ class ConversionThread(QThread):
                             f"(underruns_totales={counts[1]}) "
                             f"underflows_dispositivo={counts[2]} | entrada: "
                             f"bloques_descartados={counts[3]} | "
-                            f"muestras_tiradas_por_tope={counts[4]} | "
-                            f"silencio_recortado={trimmed_ms:.0f}ms | "
                             f"buffer={out_stream.buffered_ms:.0f}ms"
                         )
 
-                # RMS siempre (barato: ~9600 muestras) porque lo usa el
-                # silence gate; el print sigue solo con PROFILE_RVC.
-                rms_in = float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
+                # Sin gate interno: TODO bloque (voz o silencio) pasa por
+                # el motor tal cual; de la limpieza de ruido se encarga
+                # Discord. El pacing lo mantiene el buffer de salida.
                 if PROFILE_RVC:
+                    rms_in = float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
                     print(f"[RMS entrada] mic={rms_in:.4f} qsize~={self.audio_capture.audio_queue.qsize()}")
-
-                # Silence gate: bloque silencioso -> ceros directos al
-                # parlante SIN pasar por hubert/f0/synth. Se escribe
-                # exactamente un bloque (mismo largo que process()
-                # devolveria), asi el pacing del stream no se rompe.
-                if self.silence_gate_enabled and rms_in < self.silence_threshold:
-                    n = len(chunk)
-                    excess_ms = out_stream.buffered_ms - (
-                        out_stream.prefill_ms + OUTPUT_TRIM_SLACK_MS
-                    )
-                    if excess_ms > 0:
-                        drop = min(n, int(excess_ms * out_stream.sample_rate / 1000))
-                        n -= drop
-                        trimmed_ms += 1000.0 * drop / out_stream.sample_rate
-                    if n > 0:
-                        out_stream.push(np.zeros(n, dtype=np.float32), audible=False)
-                    self.latency_updated.emit(0.0)
-                    self.level_updated.emit(0.0)
-                    self._was_silent = True
-                    continue
-
-                if self._was_silent:
-                    # Volvio la voz: limpiar estado viejo del stream
-                    # (buffers de entrada + sola_buffer + caches de pitch)
-                    # para que el primer bloque con voz no mezcle audio
-                    # rancio en el crossfade.
-                    self.stream.reset()
-                    self._was_silent = False
 
                 t_start = time.perf_counter()
                 try:

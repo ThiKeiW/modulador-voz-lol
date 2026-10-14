@@ -322,3 +322,17 @@ Latencia mic->oido estimada con la config actual: ~100 (espera media de
 bloque) + ~150 (calculo) + 60 (colchon) + ~50 (dispositivo) = ~360ms
 promedio, ~460ms peor caso. Piso del diseno por bloques; bajarlo mas sin
 tocar calidad requiere reducir el calculo por bloque, no los buffers.
+
+## Supresion de ruido interna ELIMINADA (2026-10-14)
+
+Decision del usuario: de la limpieza de ruido se encarga Discord, no la
+app. Se quito el silence-gate de core/conversion_thread.py (bloques
+bajo RMS ya no se reemplazan por ceros: TODO pasa por el motor tal
+cual), junto con su drenaje de latencia (OUTPUT_TRIM_SLACK_MS, que
+solo operaba sobre silencio marcado por el gate) y el experimento
+GPU_KEEPALIVE (acoplado al gate, nunca validado).
+
+Consecuencias asumidas: sin drenaje, el buffer de salida solo puede
+crecer ante picos de computo (se queda como latencia fija hasta la
+proxima sesion); los underruns en pausas ahora cuentan como audibles
+en el [Diag]. Punto de retorno: commit 3e8ef49 (anterior a esto).
