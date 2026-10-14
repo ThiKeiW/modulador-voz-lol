@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QSlider, QFrame,
     QStatusBar, QMenuBar, QMessageBox, QSplitter,
-    QGroupBox, QCheckBox, QProgressBar, QTextEdit,
+    QGroupBox, QProgressBar, QTextEdit,
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QAction
@@ -162,24 +162,6 @@ class MainWindow(QMainWindow):
         self._add_character_button("Yuumi", "yuumi_latino", "Espanol Latino")
 
         layout.addStretch()
-
-        # Boton entrenar
-        train_btn = QPushButton("Entrenar Nuevo Personaje")
-        train_btn.setMinimumHeight(40)
-        train_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #533483;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #7b2cbf; }
-            QPushButton:pressed { background-color: #3c096c; }
-        """)
-        train_btn.clicked.connect(self._on_train_click)
-        layout.addWidget(train_btn)
 
         return panel
 
@@ -338,6 +320,10 @@ class MainWindow(QMainWindow):
         self.pitch_slider = QSlider(Qt.Orientation.Horizontal)
         self.pitch_slider.setRange(-12, 12)
         self.pitch_slider.setValue(0)
+        self.pitch_slider.setToolTip(
+            "Tono de la voz convertida: a la izquierda mas grave, "
+            "a la derecha mas agudo. 0 = tono natural del personaje."
+        )
         self.pitch_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.pitch_slider.setTickInterval(1)
         self.pitch_slider.setStyleSheet("""
@@ -368,13 +354,20 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(pitch_layout)
 
-        # Metodo F0
+        # Metodo de deteccion de tono (los 3 funcionan; cambia calidad/velocidad)
         f0_layout = QHBoxLayout()
-        f0_layout.addWidget(QLabel("Algoritmo F0:"))
+        f0_layout.addWidget(QLabel("Calidad de voz:"))
         self.f0_combo = QComboBox()
-        self.f0_combo.addItems(["rmvpe", "pm", "harvest"])
-        self.f0_combo.setCurrentText("rmvpe")
-        self.f0_combo.currentTextChanged.connect(self._on_f0_method_changed)
+        self.f0_combo.addItem("Alta calidad (recomendado)", "rmvpe")
+        self.f0_combo.addItem("Rapida (si va lento)", "pm")
+        self.f0_combo.addItem("Clasica", "harvest")
+        self.f0_combo.setToolTip(
+            "Como detecta tu tono de voz. Los 3 funcionan: RMVPE suena "
+            "mejor, PM es mas rapido, Harvest es el metodo clasico."
+        )
+        self.f0_combo.currentIndexChanged.connect(
+            lambda _: self._on_f0_method_changed(self.f0_combo.currentData())
+        )
         self.f0_combo.setStyleSheet("""
             QComboBox {
                 background-color: #1a1a2e;
@@ -394,20 +387,6 @@ class MainWindow(QMainWindow):
         """)
         f0_layout.addWidget(self.f0_combo)
         layout.addLayout(f0_layout)
-
-        # Efectos
-        effects_layout = QHBoxLayout()
-        effects_layout.addWidget(QLabel("Efectos:"))
-
-        self.reverb_cb = QCheckBox("Reverb")
-        self.reverb_cb.setStyleSheet("color: #e0e0e0;")
-        effects_layout.addWidget(self.reverb_cb)
-
-        self.echo_cb = QCheckBox("Eco")
-        self.echo_cb.setStyleSheet("color: #e0e0e0;")
-        effects_layout.addWidget(self.echo_cb)
-
-        layout.addLayout(effects_layout)
 
         return group
 
@@ -574,7 +553,6 @@ class MainWindow(QMainWindow):
         # Menu Herramientas
         tools_menu = menubar.addMenu("Herramientas")
         tools_menu.addAction("Configuracion de Audio...", self._on_audio_settings)
-        tools_menu.addAction("Entrenar Modelo...", self._on_train_click)
 
         # Menu Ayuda
         help_menu = menubar.addMenu("Ayuda")
@@ -664,7 +642,7 @@ class MainWindow(QMainWindow):
             rvc_engine=self.rvc_engine,
             output_device=out_dev,
             pitch_shift=self.pitch_slider.value(),
-            f0_method=self.f0_combo.currentText(),
+            f0_method=self.f0_combo.currentData(),
             index_rate=DEFAULT_INDEX_RATE if model.index_path else 0.0,
         )
         self.conversion_thread.status_changed.connect(self._on_conversion_status)
@@ -701,22 +679,20 @@ class MainWindow(QMainWindow):
     def _on_latency_updated(self, latency_ms: float):
         self.status_bar.showMessage(f"Convirtiendo voz en tiempo real... ({latency_ms:.0f}ms/bloque)")
 
-    def _on_train_click(self):
-        """Abre la ventana de entrenamiento."""
-        QMessageBox.information(
-            self, "Entrenamiento",
-            "GUI de entrenamiento - Proximamente.\n\n"
-            "Para entrenar un modelo RVC:\n"
-            "1. Recopila 10-30 min de audio del personaje\n"
-            "2. Usa RVC WebUI o Ultimate RVC\n"
-            "3. Coloca el modelo .pth en models/custom/"
-        )
-
     def _on_download_models(self):
         """Descarga modelos pre-entrenados."""
         from gui.download_dialog import DownloadDialog
-        dialog = DownloadDialog(self)
+        dialog = DownloadDialog(self, on_downloaded=self._on_model_downloaded)
         dialog.exec()
+
+    def _on_model_downloaded(self, model_id: str):
+        """Refresca el registro tras una descarga para usar el modelo
+        sin reiniciar, y lo deja seleccionado."""
+        if self.model_manager.refresh_model(model_id):
+            self.log(f"Modelo '{model_id}' listo para usar (sin reiniciar).")
+            self._select_character(model_id)
+        else:
+            self.log(f"[Aviso] No se pudo registrar '{model_id}', revisa la descarga.")
 
     def _on_import_model(self):
         """Importa un modelo externo."""

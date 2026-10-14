@@ -88,6 +88,24 @@ class ModelManager:
                         index_path=str(index_files[0]) if index_files else "",
                     )
 
+    def refresh_model(self, model_id: str) -> bool:
+        """Re-escanea en disco UN modelo pre-entrenado y actualiza el
+        registro (path, index_path, downloaded). Sirve para que un modelo
+        recien descargado quede usable sin reiniciar la app.
+        Retorna True si quedo registrado como descargado."""
+        model = self.models.get(model_id)
+        if not model or model.is_custom:
+            return False
+        model_dir = PRETRAINED_DIR / model_id
+        model_files = list(model_dir.glob("*.pth")) if model_dir.exists() else []
+        index_files = list(model_dir.glob("*.index")) if model_dir.exists() else []
+        if not model_files:
+            return False
+        model.path = str(model_files[0])
+        model.index_path = str(index_files[0]) if index_files else ""
+        model.downloaded = True
+        return True
+
     def get_all_models(self) -> list[VoiceModel]:
         """Retorna todos los modelos disponibles."""
         return list(self.models.values())

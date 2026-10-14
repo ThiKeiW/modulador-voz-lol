@@ -56,8 +56,10 @@ class DownloadThread(QThread):
 class DownloadDialog(QDialog):
     """Dialogo para descargar modelos pre-entrenados."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, on_downloaded=None):
         super().__init__(parent)
+        # Callback opcional: on_downloaded(model_id) al terminar OK.
+        self._on_downloaded = on_downloaded
         self.setWindowTitle("Descargar Modelos Pre-entrenados")
         self.setMinimumSize(500, 400)
         self.setStyleSheet("""
@@ -205,9 +207,15 @@ class DownloadDialog(QDialog):
         self.download_btn.setEnabled(True)
 
         if success:
+            if self._on_downloaded is not None:
+                try:
+                    self._on_downloaded(model_id)
+                except Exception as e:
+                    print(f"[DownloadDialog] Error en callback: {e}")
             QMessageBox.information(
                 self, "Exito",
-                f"Modelo {model_id} descargado correctamente."
+                f"Modelo {model_id} descargado correctamente.\n"
+                "Ya puedes usarlo sin reiniciar."
             )
         else:
             QMessageBox.critical(
