@@ -27,12 +27,12 @@ class ImportDialog(QDialog):
         self.setWindowTitle("Importar Modelo Personalizado")
         self.setMinimumSize(520, 340)
         self.setStyleSheet("""
-            QDialog { background-color: #0f0f23; color: #e0e0e0; }
-            QLabel { color: #e0e0e0; }
+            QDialog { background-color: #170B33; color: #F5F3FF; }
+            QLabel { color: #F5F3FF; }
             QLineEdit {
-                background-color: #1a1a2e;
-                color: #e0e0e0;
-                border: 1px solid #16213e;
+                background-color: #282828;
+                color: #F5F3FF;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 padding: 6px 10px;
             }
@@ -45,7 +45,7 @@ class ImportDialog(QDialog):
         layout = QVBoxLayout(self)
 
         title = QLabel("Importar modelo (.pth de Ultimate RVC, RVC-WebUI, etc.)")
-        title.setStyleSheet("font-size: 13px; font-weight: bold; color: #e94560;")
+        title.setStyleSheet("font-size: 13px; font-weight: bold; color: #F5F3FF;")
         layout.addWidget(title)
 
         # .pth obligatorio
@@ -98,14 +98,14 @@ class ImportDialog(QDialog):
         self.import_btn.setEnabled(False)
         self.import_btn.setStyleSheet("""
             QPushButton {
-                background-color: #e94560;
+                background-color: #FF2FB3;
                 border: none;
                 border-radius: 6px;
                 font-weight: bold;
                 padding: 8px 24px;
             }
-            QPushButton:hover { background-color: #ff6b81; }
-            QPushButton:disabled { background-color: #444; color: #888; }
+            QPushButton:hover { background-color: #FF5CC8; }
+            QPushButton:disabled { background-color: #3d3d3d; color: #888888; }
         """)
         self.import_btn.clicked.connect(self._on_import)
         btn_row.addWidget(self.import_btn)
@@ -114,12 +114,12 @@ class ImportDialog(QDialog):
         close_btn.setMinimumHeight(35)
         close_btn.setStyleSheet("""
             QPushButton {
-                background-color: #533483;
+                background-color: #4B0082;
                 border: none;
                 border-radius: 6px;
                 padding: 8px 24px;
             }
-            QPushButton:hover { background-color: #7b2cbf; }
+            QPushButton:hover { background-color: #5F0AA8; }
         """)
         close_btn.clicked.connect(self.close)
         btn_row.addWidget(close_btn)
@@ -143,12 +143,12 @@ class ImportDialog(QDialog):
             info = self.model_manager.inspect_rvc_checkpoint(path)
         except Exception as e:
             self._pth_ok = False
-            self.pth_status.setStyleSheet("color: #e94560; font-size: 10px;")
+            self.pth_status.setStyleSheet("color: #FF6B6B; font-size: 10px;")
             self.pth_status.setText(f"Archivo no valido: {e}")
             return
         self._pth_ok = True
         f0_txt = "con pitch" if info.get("f0") == 1 else "sin pitch"
-        self.pth_status.setStyleSheet("color: #4ecca3; font-size: 10px;")
+        self.pth_status.setStyleSheet("color: #7DE8A8; font-size: 10px;")
         self.pth_status.setText(
             f"Modelo RVC valido: version {info.get('version')} · "
             f"{f0_txt} · {info.get('sr')} Hz"

@@ -32,8 +32,8 @@ class AudioVisualizer(QFrame):
         self.audio_level = 0.0
         self.setStyleSheet("""
             QFrame {
-                background-color: #1a1a2e;
-                border: 1px solid #16213e;
+                background-color: #141414;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
             }
         """)
@@ -56,7 +56,7 @@ class AudioVisualizer(QFrame):
         height = rect.height()
 
         # Fondo
-        painter.fillRect(rect, QColor("#1a1a2e"))
+        painter.fillRect(rect, QColor("#141414"))
 
         # Barras de audio
         num_bars = 40
@@ -70,11 +70,12 @@ class AudioVisualizer(QFrame):
             bar_height = int(height * self.audio_level * (1 - freq_factor * 0.5))
             bar_height = max(2, bar_height)
 
-            # Color basado en intensidad
+            # Rampa fucsia -> morado segun intensidad (siempre visible
+            # sobre el fondo carbon).
             intensity = self.audio_level * (1 - freq_factor * 0.3)
-            r = int(100 + 155 * intensity)
-            g = int(50 + 100 * (1 - intensity))
-            b = int(200 * (1 - intensity))
+            r = int(120 + 135 * intensity)
+            g = int(20 + 27 * (1 - intensity))
+            b = int(140 + 39 * intensity)
 
             painter.setBrush(QColor(r, g, b))
             painter.setPen(Qt.PenStyle.NoPen)
@@ -128,17 +129,15 @@ class MainWindow(QMainWindow):
 
         splitter.setSizes([300, 600])
 
+    # Paleta 60/30/10 — fondo #170B33 (morado oscuro), superficies
+    # #282828/#141414 (carbon), acento #FF2FB3 (fucsia neon).
+    # Texto siempre claro (#F5F3FF / #B9B1D0). Sin cajas con borde.
+
     def _create_character_panel(self) -> QFrame:
         """Crea el panel de seleccion de personajes."""
         panel = QFrame()
-        panel.setFrameShape(QFrame.Shape.StyledPanel)
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #0f0f23;
-                border: 1px solid #1a1a3e;
-                border-radius: 8px;
-            }
-        """)
+        panel.setFrameShape(QFrame.Shape.NoFrame)
+        panel.setStyleSheet("QFrame { background: transparent; border: none; }")
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -146,7 +145,7 @@ class MainWindow(QMainWindow):
         # Titulo
         title = QLabel("PERSONAJES")
         title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        title.setStyleSheet("color: #e94560; padding: 5px;")
+        title.setStyleSheet("color: #F5F3FF; padding: 5px;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
@@ -164,7 +163,7 @@ class MainWindow(QMainWindow):
         # Grupo de personalizados (dinamico, desde ModelManager)
         self.customs_title = QLabel("PERSONALIZADOS")
         self.customs_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        self.customs_title.setStyleSheet("color: #e94560; padding: 5px;")
+        self.customs_title.setStyleSheet("color: #F5F3FF; padding: 5px;")
         self.customs_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.customs_title)
         self.customs_layout = QVBoxLayout()
@@ -199,21 +198,26 @@ class MainWindow(QMainWindow):
         for m in customs:
             row = QHBoxLayout()
             row.setSpacing(4)
-            sub = m.language + ("" if m.index_path else " · sin índice")
+            parts = []
+            if m.language:
+                parts.append(m.language)
+            if not m.index_path:
+                parts.append("sin índice")
+            sub = " · ".join(parts)
             self._add_character_button(m.name, m.id, sub, target=row)
             delete_btn = QPushButton("✕")
             delete_btn.setFixedSize(32, 50)
             delete_btn.setToolTip(f"Eliminar '{m.name}'")
             delete_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #16213e;
-                    color: #7b7b9e;
-                    border: 2px solid #1a1a3e;
+                    background-color: #282828;
+                    color: #B9B1D0;
+                    border: 1px solid #3d3d3d;
                     border-radius: 6px;
                     font-size: 12px;
                     font-weight: bold;
                 }
-                QPushButton:hover { color: #e94560; border-color: #e94560; }
+                QPushButton:hover { color: #FF2FB3; border-color: #FF2FB3; }
             """)
             delete_btn.clicked.connect(
                 lambda checked, mid=m.id, mname=m.name: self._on_delete_custom(mid, mname)
@@ -251,21 +255,21 @@ class MainWindow(QMainWindow):
         btn.setText(f"  {name}\n  {subtitle}")
         btn.setStyleSheet("""
             QPushButton {
-                background-color: #16213e;
-                color: #e0e0e0;
-                border: 2px solid #1a1a3e;
+                background-color: #282828;
+                color: #F5F3FF;
+                border: 1px solid #3d3d3d;
                 border-radius: 6px;
                 text-align: left;
                 padding: 8px 12px;
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #1a1a3e;
-                border-color: #e94560;
+                background-color: #333333;
+                border-color: #FF2FB3;
             }
             QPushButton:pressed {
-                background-color: #e94560;
-                color: white;
+                background-color: #4B0082;
+                color: #FFFFFF;
             }
         """)
         btn.clicked.connect(lambda checked, mid=model_id: self._select_character(mid))
@@ -276,14 +280,8 @@ class MainWindow(QMainWindow):
     def _create_right_panel(self) -> QFrame:
         """Crea el panel derecho con controles y visualizador."""
         panel = QFrame()
-        panel.setFrameShape(QFrame.Shape.StyledPanel)
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #0f0f23;
-                border: 1px solid #1a1a3e;
-                border-radius: 8px;
-            }
-        """)
+        panel.setFrameShape(QFrame.Shape.NoFrame)
+        panel.setStyleSheet("QFrame { background: transparent; border: none; }")
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(15, 15, 15, 15)
@@ -291,7 +289,7 @@ class MainWindow(QMainWindow):
         # Header del personaje seleccionado
         self.character_header = QLabel("Selecciona un personaje")
         self.character_header.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        self.character_header.setStyleSheet("color: #e94560; padding: 10px;")
+        self.character_header.setStyleSheet("color: #F5F3FF; padding: 10px;")
         self.character_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.character_header)
 
@@ -299,13 +297,13 @@ class MainWindow(QMainWindow):
         controls_group = self._create_voice_controls()
         layout.addWidget(controls_group)
 
-        # Salida para Discord / llamadas (microfono virtual)
+        # Salida (microfono virtual para Discord / llamadas)
         output_group = self._create_output_group()
         layout.addWidget(output_group)
 
         # Visualizador de audio
         vis_label = QLabel("VISUALIZADOR DE AUDIO")
-        vis_label.setStyleSheet("color: #7b7b9e; font-size: 10px; padding-top: 5px;")
+        vis_label.setStyleSheet("color: #B9B1D0; font-size: 10px; padding-top: 5px;")
         layout.addWidget(vis_label)
 
         self.visualizer = AudioVisualizer()
@@ -317,9 +315,9 @@ class MainWindow(QMainWindow):
         self.log_area.setReadOnly(True)
         self.log_area.setStyleSheet("""
             QTextEdit {
-                background-color: #1a1a2e;
-                color: #7b7b9e;
-                border: 1px solid #16213e;
+                background-color: #141414;
+                color: #B9B1D0;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 font-family: 'Consolas', monospace;
                 font-size: 10px;
@@ -335,16 +333,16 @@ class MainWindow(QMainWindow):
         self.start_btn.setMinimumHeight(45)
         self.start_btn.setStyleSheet("""
             QPushButton {
-                background-color: #e94560;
+                background-color: #FF2FB3;
                 color: white;
                 border: none;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #ff6b81; }
-            QPushButton:pressed { background-color: #c0392b; }
-            QPushButton:disabled { background-color: #444; color: #888; }
+            QPushButton:hover { background-color: #FF5CC8; }
+            QPushButton:pressed { background-color: #C4007F; }
+            QPushButton:disabled { background-color: #3d3d3d; color: #888888; }
         """)
         self.start_btn.clicked.connect(self._on_start_click)
         buttons_layout.addWidget(self.start_btn)
@@ -354,16 +352,16 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.stop_btn.setStyleSheet("""
             QPushButton {
-                background-color: #533483;
+                background-color: #4B0082;
                 color: white;
                 border: none;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #7b2cbf; }
-            QPushButton:pressed { background-color: #3c096c; }
-            QPushButton:disabled { background-color: #444; color: #888; }
+            QPushButton:hover { background-color: #5F0AA8; }
+            QPushButton:pressed { background-color: #36005E; }
+            QPushButton:disabled { background-color: #3d3d3d; color: #888888; }
         """)
         self.stop_btn.clicked.connect(self._on_stop_click)
         buttons_layout.addWidget(self.stop_btn)
@@ -375,20 +373,20 @@ class MainWindow(QMainWindow):
     def _create_voice_controls(self) -> QGroupBox:
         """Crea el grupo de controles de voz."""
         group = QGroupBox("Controles de Voz")
+        group.setFlat(True)
         group.setStyleSheet("""
             QGroupBox {
-                background-color: #16213e;
-                border: 1px solid #1a1a3e;
-                border-radius: 6px;
-                padding: 15px;
-                margin-top: 10px;
-                color: #e0e0e0;
+                background: transparent;
+                border: none;
+                padding-top: 12px;
+                margin-top: 6px;
+                color: #F5F3FF;
                 font-weight: bold;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 5px;
+                left: 0px;
+                padding: 0 0px;
             }
         """)
 
@@ -396,7 +394,9 @@ class MainWindow(QMainWindow):
 
         # Pitch
         pitch_layout = QHBoxLayout()
-        pitch_layout.addWidget(QLabel("Pitch:"))
+        pitch_title = QLabel("Pitch:")
+        pitch_title.setStyleSheet("color: #F5F3FF;")
+        pitch_layout.addWidget(pitch_title)
         self.pitch_slider = QSlider(Qt.Orientation.Horizontal)
         self.pitch_slider.setRange(-12, 12)
         self.pitch_slider.setValue(0)
@@ -409,18 +409,18 @@ class MainWindow(QMainWindow):
         self.pitch_slider.setStyleSheet("""
             QSlider::groove:horizontal {
                 height: 6px;
-                background: #1a1a2e;
+                background: #3d3d3d;
                 border-radius: 3px;
             }
             QSlider::handle:horizontal {
-                background: #e94560;
+                background: #FF2FB3;
                 width: 16px;
                 height: 16px;
                 margin: -5px 0;
                 border-radius: 8px;
             }
             QSlider::sub-page:horizontal {
-                background: #e94560;
+                background: #FF2FB3;
                 border-radius: 3px;
             }
         """)
@@ -429,14 +429,16 @@ class MainWindow(QMainWindow):
 
         self.pitch_label = QLabel("0")
         self.pitch_label.setMinimumWidth(30)
-        self.pitch_label.setStyleSheet("color: #e94560; font-weight: bold;")
+        self.pitch_label.setStyleSheet("color: #FF2FB3; font-weight: bold;")
         pitch_layout.addWidget(self.pitch_label)
 
         layout.addLayout(pitch_layout)
 
         # Metodo de deteccion de tono (los 3 funcionan; cambia calidad/velocidad)
         f0_layout = QHBoxLayout()
-        f0_layout.addWidget(QLabel("Calidad de voz:"))
+        f0_title = QLabel("Calidad de voz:")
+        f0_title.setStyleSheet("color: #F5F3FF;")
+        f0_layout.addWidget(f0_title)
         self.f0_combo = QComboBox()
         self.f0_combo.addItem("Alta calidad (recomendado)", "rmvpe")
         self.f0_combo.addItem("Rapida (si va lento)", "pm")
@@ -450,9 +452,9 @@ class MainWindow(QMainWindow):
         )
         self.f0_combo.setStyleSheet("""
             QComboBox {
-                background-color: #1a1a2e;
-                color: #e0e0e0;
-                border: 1px solid #1a1a3e;
+                background-color: #282828;
+                color: #F5F3FF;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 padding: 5px 10px;
             }
@@ -460,9 +462,9 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             QComboBox QAbstractItemView {
-                background-color: #1a1a2e;
-                color: #e0e0e0;
-                selection-background-color: #e94560;
+                background-color: #282828;
+                color: #F5F3FF;
+                selection-background-color: #4B0082;
             }
         """)
         f0_layout.addWidget(self.f0_combo)
@@ -480,42 +482,44 @@ class MainWindow(QMainWindow):
         )
         self._audio_device_helpers = (list_output_devices, find_cable_playback, find_cable_mic)
 
-        group = QGroupBox("Salida para Discord / llamadas")
+        group = QGroupBox("Salida")
+        group.setFlat(True)
         group.setStyleSheet("""
             QGroupBox {
-                background-color: #16213e;
-                border: 1px solid #1a1a3e;
-                border-radius: 6px;
-                padding: 12px;
-                margin-top: 8px;
-                color: #e0e0e0;
+                background: transparent;
+                border: none;
+                padding-top: 12px;
+                margin-top: 6px;
+                color: #F5F3FF;
                 font-weight: bold;
                 font-size: 11px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 5px;
+                left: 0px;
+                padding: 0 0px;
             }
         """)
         layout = QVBoxLayout(group)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("Reproducir voz en:"))
+        out_title = QLabel("Reproducir voz en:")
+        out_title.setStyleSheet("color: #F5F3FF;")
+        row.addWidget(out_title)
         self.output_combo = QComboBox()
         self.output_combo.setStyleSheet("""
             QComboBox {
-                background-color: #1a1a2e;
-                color: #e0e0e0;
-                border: 1px solid #1a1a3e;
+                background-color: #282828;
+                color: #F5F3FF;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 padding: 6px 10px;
                 min-height: 20px;
             }
             QComboBox QAbstractItemView {
-                background-color: #1a1a2e;
-                color: #e0e0e0;
-                selection-background-color: #e94560;
+                background-color: #282828;
+                color: #F5F3FF;
+                selection-background-color: #4B0082;
             }
         """)
         row.addWidget(self.output_combo, 1)
@@ -523,14 +527,14 @@ class MainWindow(QMainWindow):
 
         self.cable_hint = QLabel("")
         self.cable_hint.setWordWrap(True)
-        self.cable_hint.setStyleSheet("color: #7b7b9e; font-size: 10px;")
+        self.cable_hint.setStyleSheet("color: #B9B1D0; font-size: 10px;")
         layout.addWidget(self.cable_hint)
 
         btn_row = QHBoxLayout()
         self.use_cable_btn = QPushButton("Usar cable virtual")
         self.use_cable_btn.setStyleSheet("""
             QPushButton {
-                background-color: #533483;
+                background-color: #4B0082;
                 color: white;
                 border: none;
                 border-radius: 4px;
@@ -538,8 +542,8 @@ class MainWindow(QMainWindow):
                 font-size: 10px;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #7b2cbf; }
-            QPushButton:disabled { background-color: #444; color: #888; }
+            QPushButton:hover { background-color: #5F0AA8; }
+            QPushButton:disabled { background-color: #3d3d3d; color: #888888; }
         """)
         self.use_cable_btn.clicked.connect(self._on_use_cable_click)
         btn_row.addWidget(self.use_cable_btn)
@@ -547,14 +551,14 @@ class MainWindow(QMainWindow):
         refresh_btn = QPushButton("Refrescar")
         refresh_btn.setStyleSheet("""
             QPushButton {
-                background-color: #1a1a2e;
-                color: #7b7b9e;
-                border: 1px solid #16213e;
+                background-color: #282828;
+                color: #B9B1D0;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 padding: 6px 12px;
                 font-size: 10px;
             }
-            QPushButton:hover { background-color: #16213e; color: #e0e0e0; }
+            QPushButton:hover { background-color: #333333; color: #F5F3FF; }
         """)
         refresh_btn.clicked.connect(self._refresh_output_devices)
         btn_row.addWidget(refresh_btn)
@@ -578,14 +582,14 @@ class MainWindow(QMainWindow):
         self._cable_index = find_playback()
         mic_name = find_mic()
         if self._cable_index is not None:
-            self.cable_hint.setStyleSheet("color: #4ecca3; font-size: 10px;")
+            self.cable_hint.setStyleSheet("color: #7DE8A8; font-size: 10px;")
             self.cable_hint.setText(
                 "Cable virtual detectado. Pulsa 'Usar cable virtual' y en "
                 f"Discord/Windows elige como microfono '{mic_name or 'CABLE Output'}'."
             )
             self.use_cable_btn.setEnabled(True)
         else:
-            self.cable_hint.setStyleSheet("color: #e0b34e; font-size: 10px;")
+            self.cable_hint.setStyleSheet("color: #E8C15A; font-size: 10px;")
             self.cable_hint.setText(
                 "Sin cable virtual: instala VB-CABLE (vb-audio.com/Cable) "
                 "como administrador y pulsa Refrescar."
@@ -610,17 +614,17 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         menubar.setStyleSheet("""
             QMenuBar {
-                background-color: #0f0f23;
-                color: #e0e0e0;
-                border-bottom: 1px solid #1a1a3e;
+                background-color: #170B33;
+                color: #F5F3FF;
+                border-bottom: 1px solid #3d3d3d;
             }
-            QMenuBar::item:selected { background-color: #1a1a3e; }
+            QMenuBar::item:selected { background-color: #4B0082; }
             QMenu {
-                background-color: #16213e;
-                color: #e0e0e0;
-                border: 1px solid #1a1a3e;
+                background-color: #282828;
+                color: #F5F3FF;
+                border: 1px solid #3d3d3d;
             }
-            QMenu::item:selected { background-color: #e94560; }
+            QMenu::item:selected { background-color: #4B0082; }
         """)
 
         # Menu Archivo
@@ -644,16 +648,16 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.setStyleSheet("""
             QStatusBar {
-                background-color: #0f0f23;
-                color: #7b7b9e;
-                border-top: 1px solid #1a1a3e;
+                background-color: #141414;
+                color: #B9B1D0;
+                border-top: 1px solid #3d3d3d;
             }
         """)
         self.status_bar.showMessage("Listo - Selecciona un personaje para comenzar")
 
         # Indicador de dispositivo
         self.device_label = QLabel("GPU: GTX 1650")
-        self.device_label.setStyleSheet("color: #4ecca3; padding-right: 10px;")
+        self.device_label.setStyleSheet("color: #7DE8A8; padding-right: 10px;")
         self.status_bar.addPermanentWidget(self.device_label)
 
     def _select_character(self, model_id: str):

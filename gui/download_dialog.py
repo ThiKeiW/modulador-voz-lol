@@ -63,8 +63,8 @@ class DownloadDialog(QDialog):
         self.setWindowTitle("Descargar Modelos Pre-entrenados")
         self.setMinimumSize(500, 400)
         self.setStyleSheet("""
-            QDialog { background-color: #0f0f23; color: #e0e0e0; }
-            QLabel { color: #e0e0e0; }
+            QDialog { background-color: #170B33; color: #F5F3FF; }
+            QLabel { color: #F5F3FF; }
             QPushButton { color: white; }
         """)
 
@@ -75,24 +75,24 @@ class DownloadDialog(QDialog):
 
         # Titulo
         title = QLabel("Modelos Disponibles para Descarga")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #e94560;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #F5F3FF;")
         layout.addWidget(title)
 
         # Lista de modelos
         self.model_list = QListWidget()
         self.model_list.setStyleSheet("""
             QListWidget {
-                background-color: #1a1a2e;
-                border: 1px solid #16213e;
+                background-color: #282828;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 padding: 5px;
             }
             QListWidget::item {
                 padding: 8px;
-                border-bottom: 1px solid #16213e;
+                border-bottom: 1px solid #3d3d3d;
             }
-            QListWidget::item:hover { background-color: #16213e; }
-            QListWidget::item:selected { background-color: #533483; }
+            QListWidget::item:hover { background-color: #333333; }
+            QListWidget::item:selected { background-color: #4B0082; }
         """)
 
         for model_id, info in PRETRAINED_MODELS.items():
@@ -113,14 +113,14 @@ class DownloadDialog(QDialog):
         self.progress_bar.setVisible(False)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                background-color: #1a1a2e;
-                border: 1px solid #16213e;
+                background-color: #282828;
+                border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 text-align: center;
                 color: white;
             }
             QProgressBar::chunk {
-                background-color: #e94560;
+                background-color: #FF2FB3;
                 border-radius: 3px;
             }
         """)
@@ -137,13 +137,13 @@ class DownloadDialog(QDialog):
         self.download_btn.setMinimumHeight(35)
         self.download_btn.setStyleSheet("""
             QPushButton {
-                background-color: #e94560;
+                background-color: #FF2FB3;
                 border: none;
                 border-radius: 6px;
                 font-weight: bold;
                 padding: 8px 20px;
             }
-            QPushButton:hover { background-color: #ff6b81; }
+            QPushButton:hover { background-color: #FF5CC8; }
         """)
         self.download_btn.clicked.connect(self._on_download)
         btn_layout.addWidget(self.download_btn)
@@ -152,12 +152,12 @@ class DownloadDialog(QDialog):
         close_btn.setMinimumHeight(35)
         close_btn.setStyleSheet("""
             QPushButton {
-                background-color: #533483;
+                background-color: #4B0082;
                 border: none;
                 border-radius: 6px;
                 padding: 8px 20px;
             }
-            QPushButton:hover { background-color: #7b2cbf; }
+            QPushButton:hover { background-color: #5F0AA8; }
         """)
         close_btn.clicked.connect(self.close)
         btn_layout.addWidget(close_btn)

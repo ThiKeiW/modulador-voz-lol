@@ -102,18 +102,18 @@ def main():
     app.setApplicationName("Voicemod LoL")
     app.setApplicationVersion("1.0.0")
 
-    # Estilo global oscuro
+    # Estilo global: fondo morado oscuro, tooltips legibles
     app.setStyleSheet("""
         * {
             font-family: 'Segoe UI', 'Arial', sans-serif;
         }
         QMainWindow {
-            background-color: #0a0a1a;
+            background-color: #170B33;
         }
         QToolTip {
-            background-color: #16213e;
-            color: #e0e0e0;
-            border: 1px solid #1a1a3e;
+            background-color: #282828;
+            color: #F5F3FF;
+            border: 1px solid #FF2FB3;
             padding: 4px;
         }
     """)
