@@ -582,10 +582,12 @@ class MainWindow(QMainWindow):
         self._cable_index = find_playback()
         mic_name = find_mic()
         if self._cable_index is not None:
+            self._ensure_cable_entry(self._cable_index)
             self.cable_hint.setStyleSheet("color: #7DE8A8; font-size: 10px;")
             self.cable_hint.setText(
-                "Cable virtual detectado. Pulsa 'Usar cable virtual' y en "
-                f"Discord/Windows elige como microfono '{mic_name or 'CABLE Output'}'."
+                "Cable virtual detectado (entrada WASAPI). Pulsa 'Usar cable "
+                "virtual' y en Discord/Windows elige como microfono "
+                f"'{mic_name or 'CABLE Output'}'."
             )
             self.use_cable_btn.setEnabled(True)
         else:
@@ -595,6 +597,36 @@ class MainWindow(QMainWindow):
                 "como administrador y pulsa Refrescar."
             )
             self.use_cable_btn.setEnabled(False)
+
+    def _ensure_cable_entry(self, cable_index: int):
+        """Hace seleccionable la entrada WASAPI del cable.
+
+        El combo deduplica por nombre y Windows publica "CABLE Input" con
+        el mismo nombre en MME/DirectSound/WASAPI/WDM-KS. Como MME suele
+        venir primero, se queda esa entrada y el indice WASAPI (el que
+        suena bien) nunca llega al combo, asi que "Usar cable virtual"
+        no podia seleccionarlo. Se reapunta la entrada visible al indice
+        WASAPI y se etiqueta para identificarla.
+        """
+        from core.audio_devices import _device_dict, _hostapi_name
+
+        info = _device_dict(cable_index) or {}
+        name = info.get("name", "CABLE Input")
+        api = _hostapi_name(cable_index).replace("Windows ", "").strip()
+        label = f"{name} · {api}" if api else name
+
+        pos = self.output_combo.findData(cable_index)
+        if pos >= 0:
+            self.output_combo.setItemText(pos, label)
+            return
+        # Reutilizar la entrada con el mismo nombre (p.ej. la de MME) para
+        # no duplicar opciones en el desplegable.
+        pos = self.output_combo.findText(name)
+        if pos >= 0:
+            self.output_combo.setItemData(pos, cable_index)
+            self.output_combo.setItemText(pos, label)
+        else:
+            self.output_combo.addItem(label, cable_index)
 
     def _on_use_cable_click(self):
         """Selecciona el cable virtual como salida."""

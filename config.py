@@ -72,11 +72,13 @@ PROFILE_RVC = False
 # Salida de audio (core/audio_output.py). El hilo de conversion hace push()
 # sin bloquear y un callback de PortAudio consume.
 # - OUTPUT_PREFILL_MS: colchon de silencio antes del primer bloque (y
-#   tras cada underrun). Absorbe el jitter del computo (~125-165ms por
+#   tras cada underrun). Absorbe el jitter del computo (~135-200ms por
 #   bloque de 200ms). Mas alto = menos huecos, pero suma latencia 1:1.
+#   Medido en llamada real: con 60ms aparecian huecos de 80-120ms en
+#   mitad de palabra (picos de computo). 250ms los absorbe.
 # - OUTPUT_MAX_BUFFER_MS: tope; si se acumula mas, se tira lo mas viejo.
 # - OUTPUT_LATENCY: buffer interno de PortAudio (s).
-OUTPUT_PREFILL_MS = 60
+OUTPUT_PREFILL_MS = 250
 OUTPUT_MAX_BUFFER_MS = 800
 OUTPUT_LATENCY = 0.05
 

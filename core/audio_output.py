@@ -53,9 +53,23 @@ class StreamingOutput:
         self.device_underflows = 0  # underflows reportados por PortAudio mismo
         self.dropped_frames = 0    # muestras tiradas por buffer demasiado lleno
 
+        # Canales: SIEMPRE 2 si el dispositivo los soporta, aunque el audio
+        # sea mono. Con VB-CABLE (WASAPI) un stream de 1 canal abre sin
+        # error pero entrega audio corrompido (medido: tono de 440 Hz sale
+        # como ruido ~873 Hz); en 2 canales sale limpio. En altavoces no
+        # cambia nada (el mismo mono se copia a ambos canales).
+        self._channels = 1
+        try:
+            info = sd.query_devices(device, "output") if device is not None \
+                else sd.query_devices(kind="output")
+            if int(info.get("max_output_channels", 0)) >= 2:
+                self._channels = 2
+        except Exception:
+            pass
+
         self._stream = sd.OutputStream(
             samplerate=sample_rate,
-            channels=1,
+            channels=self._channels,
             dtype="float32",
             device=device,
             latency=latency,
@@ -141,3 +155,6 @@ class StreamingOutput:
                 self._primed = False
 
         outdata[:, 0] = out
+        if self._channels > 1:
+            # Voz mono replicada: el cable y Windows esperan estereo.
+            outdata[:, 1:self._channels] = out[:, None]

@@ -40,3 +40,6 @@ dist/
 !assets/icons/.gitkeep
 !assets/sounds/.gitkeep
 !models/pretrained/README.md
+
+# Evidencia local de diagnostico (WAVs de prueba)
+diagnostics/

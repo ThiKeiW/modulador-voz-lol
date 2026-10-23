@@ -14,11 +14,25 @@ de audio_capture.start()). Pasar chunks de otro tamano rompe el streaming.
 """
 import time
 import traceback
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
 from PyQt6.QtCore import QThread, pyqtSignal
+
+_DIAG_FILE = Path(__file__).resolve().parent.parent / "diagnostics" / "diag.log"
+
+
+def _persist_diag(msg: str) -> None:
+    try:
+        _DIAG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _DIAG_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+    except OSError:
+        pass
+
 
 from config import (
     DEFAULT_PITCH_SHIFT,
@@ -170,7 +184,7 @@ class ConversionThread(QThread):
                     )
                     if counts != last_counts:
                         last_counts = counts
-                        print(
+                        diag = (
                             f"[Diag] salida: huecos_en_voz={counts[0]} "
                             f"(underruns_totales={counts[1]}) "
                             f"underflows_dispositivo={counts[2]} | entrada: "
@@ -179,6 +193,8 @@ class ConversionThread(QThread):
                             f"silencio_recortado={trimmed_ms:.0f}ms | "
                             f"buffer={out_stream.buffered_ms:.0f}ms"
                         )
+                        print(diag)
+                        _persist_diag(diag)
 
                 # RMS siempre (barato: ~9600 muestras) porque lo usa el
                 # silence gate; el print sigue solo con PROFILE_RVC.
