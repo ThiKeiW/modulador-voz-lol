@@ -87,6 +87,35 @@ El criterio de `--mode analyze` se afino para no dar falsos positivos:
 ignora ruido de fondo (<-60 dBFS) y exige voz fuerte a ambos lados
 (RMS > 0.05) y hueco < 600 ms para marcar un corte duro.
 
+## Tercera prueba (2026-10-23 17:40, fade de 10 ms)
+
+`diagnostics/prueba_llamada_20261023_174035.wav`: pico -3.0 dBFS, RMS
+-18.5 dBFS, 0 clipping, 5 huecos y **0 cortes duros**. Las 4 pausas
+internas tienen `borde=0.001` (contra 0.138 de la prueba sin fade): la
+rampa del gate esta funcionando y ya no hay escalon a cero. El unico
+borde alto (0.164 a los 0.02 s) es el arranque de la grabacion, con
+audio previo casi mudo (`rms_antes=0.005`), no audible.
+
+El `diag.log` de esa sesion arranca a las 17:41 (despues de que el WAV
+cerrara a las 17:40:36), asi que no cubre la grabacion. Como contexto:
+`huecos_en_voz=0`, `bloques_descartados=0`,
+`muestras_tiradas_por_tope=0`, buffer 260-280 ms y un underrun en
+silencio (7 a 8 en 46 s).
+
+## Bordes duros del silence gate
+
+En la misma grabacion, todos los ceros exactos empiezan en la misma fase
+del bloque (77 ms mod 200 ms), duran multiplos de 200 ms y el sample
+anterior no es cero (hasta 0.138). No eran underruns (`huecos_en_voz=0`):
+era el gate emitiendo el bloque completo en cero, con un escalon seco en
+cada pausa.
+
+Fix aplicado: `GATE_FADE_MS = 10` en `config.py`.
+`ConversionThread` hace ahora una rampa de 10 ms al cerrar el gate
+(partiendo de la ultima muestra, no de cero) y otra al reabrirlo con voz.
+No cambia CPU, ni pausas, ni latencia. El analizador tambien verifica el
+sample del borde, para no confundir un gate suavizado con un corte real.
+
 ## Cambios restantes por hacer
 
 1. **Latencia**: el colchon de 250 ms anade ~190 ms. Si en llamada se
@@ -111,7 +140,8 @@ ignora ruido de fondo (<-60 dBFS) y exige voz fuerte a ambos lados
 - Sin commitear: `core/audio_output.py` (estereo), `core/audio_devices.py`
   (preferencia WASAPI + `find_cable_capture`), `scripts/diag_cable.py`,
   `.gitignore` (`diagnostics/`), `gui/main_window.py`, `config.py`
-  (`OUTPUT_PREFILL_MS=250`) y `core/conversion_thread.py` (log a archivo).
+  (`OUTPUT_PREFILL_MS=250`, `GATE_FADE_MS=10`) y
+  `core/conversion_thread.py` (log a archivo + rampas del gate).
 - `diagnostics/` contiene los WAV de prueba y `diag.log` (ignorado por git).
 
 ## Comandos

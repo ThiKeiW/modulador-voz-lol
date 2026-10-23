@@ -63,6 +63,10 @@ DEFAULT_INDEX_RATE = 0.5  # 0 = sin retrieval por indice, 1 = maximo
 # Al retomar voz se hace stream.reset() para no arrastrar estado viejo.
 SILENCE_GATE_ENABLED = True
 SILENCE_RMS_THRESHOLD = 0.002  # subir si el micro tiene mas ruido de fondo
+# Rampa de entrada/salida del gate (ms). Sin esto el bloque pasa de voz a
+# cero exacto de un sample al siguiente: se oye un click/corte seco en
+# cada pausa. 10 ms alcanza para suavizarlo sin comerse audio util.
+GATE_FADE_MS = 10
 
 # Imprime cuanto tarda cada etapa (hubert/f0/sintetizador/indice) por
 # bloque en consola. Prender mientras se ajusta latencia, apagar despues

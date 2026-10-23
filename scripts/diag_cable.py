@@ -163,12 +163,18 @@ def find_gaps(samples: np.ndarray, sr: int) -> list:
                 s, e = a + run_start, a + i
                 pre = rms(samples[max(0, s - int(0.1 * sr)):s])
                 post = rms(samples[e:e + int(0.1 * sr)])
+                edge = abs(float(samples[s - 1])) if s > 0 else 0.0
                 gaps.append({
                     "t": round(s / sr, 3),
                     "ms": round(1000.0 * n / sr),
                     "pre_rms": round(pre, 4),
                     "post_rms": round(post, 4),
-                    "hard_cut": pre > 0.05 and post > 0.05 and n < 0.6 * sr,
+                    "edge": round(edge, 4),
+                    # Un corte real deja el ultimo sample en amplitud
+                    # (transicion abrupta a cero). El gate con fade llega
+                    # a cero suavemente, asi que no debe marcarse.
+                    "hard_cut": edge > 0.01 and pre > 0.05 and post > 0.05
+                                and n < 0.6 * sr,
                 })
             run_start = None
     return gaps
@@ -196,8 +202,8 @@ def mode_analyze(args) -> int:
     for g in gaps:
         mark = "CORTE DURO" if g["hard_cut"] else "pausa/gate"
         print(f"  t={g['t']:>7.2f}s  {g['ms']:>5}ms  "
-              f"rms_antes={g['pre_rms']:.3f} rms_despues={g['post_rms']:.3f}"
-              f"  {mark}")
+              f"rms_antes={g['pre_rms']:.3f} rms_despues={g['post_rms']:.3f} "
+              f"borde={g['edge']:.3f}  {mark}")
     if hard:
         print("\nVEREDICTO: hay cortes duros -> underrun de salida o "
               "bloque perdido. Subir OUTPUT_PREFILL_MS o revisar el log "

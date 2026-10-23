@@ -44,6 +44,7 @@ from config import (
     PROFILE_RVC,
     SILENCE_GATE_ENABLED,
     SILENCE_RMS_THRESHOLD,
+    GATE_FADE_MS,
     OUTPUT_PREFILL_MS,
     OUTPUT_MAX_BUFFER_MS,
     OUTPUT_LATENCY,
@@ -80,6 +81,7 @@ class ConversionThread(QThread):
         extra_ms: float = REALTIME_EXTRA_MS,
         silence_gate_enabled: bool = SILENCE_GATE_ENABLED,
         silence_threshold: float = SILENCE_RMS_THRESHOLD,
+        gate_fade_ms: float = GATE_FADE_MS,
         parent=None,
     ):
         super().__init__(parent)
@@ -95,10 +97,14 @@ class ConversionThread(QThread):
         self.extra_ms = extra_ms
         self.silence_gate_enabled = silence_gate_enabled
         self.silence_threshold = silence_threshold
+        self.gate_fade_ms = gate_fade_ms
 
         self.running = False
         self.stream: Optional[RVCStream] = None
         self._was_silent = False
+        self._fade_n = 0
+        self._last_out_sample = 0.0
+        self._gate_closed = False
 
     def run(self):
         if not self.rvc_engine.is_loaded():
@@ -149,6 +155,9 @@ class ConversionThread(QThread):
                 latency=OUTPUT_LATENCY,
             )
             out_stream.start()
+            self._fade_n = int(
+                self.audio_capture.sample_rate * self.gate_fade_ms / 1000
+            )
             last_report = time.monotonic()
             last_counts = (0, 0, 0, 0, 0)
             trimmed_ms = 0.0
@@ -216,7 +225,18 @@ class ConversionThread(QThread):
                         n -= drop
                         trimmed_ms += 1000.0 * drop / out_stream.sample_rate
                     if n > 0:
-                        out_stream.push(np.zeros(n, dtype=np.float32), audible=False)
+                        block = np.zeros(n, dtype=np.float32)
+                        if self._fade_n and self._last_out_sample:
+                            f = min(self._fade_n, n)
+                            ramp = 0.5 * (
+                                1.0 + np.cos(np.pi * np.arange(f) / max(1, f - 1))
+                            )
+                            block[:f] = self._last_out_sample * ramp.astype(
+                                np.float32
+                            )
+                        out_stream.push(block, audible=False)
+                        self._last_out_sample = 0.0
+                        self._gate_closed = True
                     self.latency_updated.emit(0.0)
                     self.level_updated.emit(0.0)
                     self._was_silent = True
@@ -251,6 +271,16 @@ class ConversionThread(QThread):
 
                 converted = np.ascontiguousarray(converted, dtype=np.float32)
 
+                if self._gate_closed and self._fade_n and converted.size:
+                    # Volvio la voz: arrancar desde cero para que el salto
+                    # de silencio a audio no suene a click.
+                    f = min(self._fade_n, converted.size)
+                    ramp = 0.5 * (
+                        1.0 - np.cos(np.pi * np.arange(f) / max(1, f - 1))
+                    )
+                    converted[:f] *= ramp.astype(np.float32)
+                    self._gate_closed = False
+
                 if PROFILE_RVC:
                     # Para saber si el silencio ya viene DENTRO del audio
                     # que arma el motor (bug de DSP, se arregla en
@@ -265,6 +295,8 @@ class ConversionThread(QThread):
                     print(f"[RMS bloque] inicio={rms_start:.4f} medio={rms_mid:.4f} fin={rms_end:.4f}")
 
                 out_stream.push(converted)
+                if converted.size:
+                    self._last_out_sample = float(converted[-1])
 
                 self.latency_updated.emit(compute_ms)
                 if compute_ms > self.block_ms:
